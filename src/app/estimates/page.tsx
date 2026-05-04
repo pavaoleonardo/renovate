@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getEstimates, createEstimate } from '@/app/actions';
+import { getEstimates, createEstimate, getCompanyProfile } from '@/app/actions';
 import { redirect } from 'next/navigation';
 import { Estimate } from '@/types';
 
@@ -49,6 +49,7 @@ function formatDate(dateStr?: string) {
 
 export default async function EstimatesList() {
   const { data } = await getEstimates();
+  const company = await getCompanyProfile();
   const estimates = data || [];
   const grouped = groupByYear(estimates);
   const years = Object.keys(grouped).sort((a, b) => b.localeCompare(a)); // newest first
@@ -65,6 +66,7 @@ export default async function EstimatesList() {
     <div className="max-w-5xl mx-auto py-12 px-4">
       <div className="flex justify-between items-center mb-10 flex-col md:flex-row gap-4">
         <div>
+          {company && <p className="text-sm font-bold text-blue-600 uppercase tracking-widest mb-1">{company.name}</p>}
           <h1 className="text-4xl font-extrabold text-zinc-900 tracking-tight">Presupuestos</h1>
           <p className="text-zinc-500 mt-2 font-medium">Gestiona las propuestas de reforma de tu empresa.</p>
         </div>
