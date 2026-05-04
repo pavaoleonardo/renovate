@@ -20,6 +20,7 @@
 .DS_Store
 *.pem
 *.md
+*.pdf
 
 # debug
 npm-debug.log*
