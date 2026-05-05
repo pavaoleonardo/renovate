@@ -15,7 +15,17 @@ export async function getEstimates() {
 
 export async function getCompanyProfile(): Promise<CompanyProfile | null> {
   const supabase = createClient();
-  const { data: user } = await supabase.from('users').select('company_id').single();
+
+  // Get the authenticated user from auth first
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  if (!authUser) return null;
+
+  const { data: user } = await supabase
+    .from('users')
+    .select('company_id')
+    .eq('id', authUser.id)
+    .single();
+
   if (!user?.company_id) return null;
   
   const { data, error } = await supabase
