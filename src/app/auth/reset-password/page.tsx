@@ -1,5 +1,6 @@
 import { updatePassword } from '@/app/login/actions'
 import Link from 'next/link'
+import PasswordInput from '@/components/PasswordInput'
 
 export default function ResetPasswordPage({
   searchParams,
@@ -19,14 +20,7 @@ export default function ResetPasswordPage({
         <label className="text-md font-bold mt-4" htmlFor="password">
           Nueva contraseña
         </label>
-        <input
-          className="rounded-lg px-4 py-3 bg-zinc-50 border border-zinc-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition mb-2 font-medium"
-          type="password"
-          name="password"
-          placeholder="••••••••"
-          minLength={8}
-          required
-        />
+        <PasswordInput name="password" minLength={8} required />
         <p className="text-zinc-400 text-xs mb-4">Mínimo 8 caracteres.</p>
 
         <button
