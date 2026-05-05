@@ -1,5 +1,6 @@
 import { login, signup } from './actions'
 import Link from 'next/link'
+import PasswordInput from '@/components/PasswordInput'
 
 export default function LoginPage({
   searchParams,
@@ -30,13 +31,8 @@ export default function LoginPage({
         <label className="text-md font-bold" htmlFor="password">
           Contraseña
         </label>
-        <input
-          className="rounded-lg px-4 py-3 bg-zinc-50 border border-zinc-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition mb-6 font-medium"
-          type="password"
-          name="password"
-          placeholder="••••••••"
-          required
-        />
+        <PasswordInput name="password" required />
+
 
         <div className="flex justify-end -mt-4 mb-4">
           <Link href="/login/forgot-password" className="text-sm text-blue-600 hover:text-blue-700 font-semibold transition">
