@@ -53,3 +53,32 @@ export async function signOut() {
   await supabase.auth.signOut()
   return redirect('/login')
 }
+
+export async function forgotPassword(formData: FormData) {
+  const email = formData.get('email') as string
+  const supabase = createClient()
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://renovation-estimates-saas.vercel.app'}/auth/reset-password`,
+  })
+
+  if (error) {
+    return redirect('/login/forgot-password?message=Error sending reset email')
+  }
+
+  return redirect('/login/forgot-password?message=Check your email for a password reset link')
+}
+
+export async function updatePassword(formData: FormData) {
+  const password = formData.get('password') as string
+  const supabase = createClient()
+
+  const { error } = await supabase.auth.updateUser({ password })
+
+  if (error) {
+    return redirect('/auth/reset-password?message=Error updating password')
+  }
+
+  revalidatePath('/', 'layout')
+  redirect('/estimates?message=Password updated successfully')
+}

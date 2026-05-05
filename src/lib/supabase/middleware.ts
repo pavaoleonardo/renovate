@@ -54,7 +54,8 @@ export async function updateSession(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
   
-  if (!user && path !== '/login' && path !== '/') {
+  const publicPaths = ['/login', '/', '/login/forgot-password', '/auth/reset-password'];
+  if (!user && !publicPaths.includes(path)) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
