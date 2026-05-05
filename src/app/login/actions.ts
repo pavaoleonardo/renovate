@@ -63,7 +63,7 @@ export async function forgotPassword(formData: FormData) {
   })
 
   if (error) {
-    return redirect('/login/forgot-password?message=Error sending reset email')
+    return redirect(`/login/forgot-password?message=${encodeURIComponent(error.message)}`)
   }
 
   return redirect('/login/forgot-password?message=Check your email for a password reset link')
