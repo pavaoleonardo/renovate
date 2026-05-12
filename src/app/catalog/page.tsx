@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { processExcelUpload, searchCatalog } from './actions'
+import { processExcelUpload } from './actions'
+import { searchCatalog } from '@/app/actions'
 import { UploadCloud, CheckCircle2, AlertCircle, RefreshCw, Box } from 'lucide-react'
 import { CatalogService } from '@/types'
 
