@@ -13,7 +13,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Get company_id for this user
   const { data: userRecord } = await supabase
     .from('users')
     .select('company_id')
@@ -46,10 +45,10 @@ export async function POST(req: NextRequest) {
   // ── 3. Record this call ────────────────────────────────────────
   await supabase.from('ai_rate_limits').insert({ company_id: companyId, endpoint });
 
-  // ── 4. OpenAI call ─────────────────────────────────────────────
-  const apiKey = process.env.OPENAI_API_KEY;
+  // ── 4. Gemini API call ─────────────────────────────────────────
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return NextResponse.json({ error: 'OpenAI API key not configured' }, { status: 500 });
+    return NextResponse.json({ error: 'Gemini API key not configured' }, { status: 500 });
   }
 
   const { rows } = await req.json();
@@ -72,19 +71,20 @@ Devuelve ÚNICAMENTE un JSON con el formato: { "id_del_servicio": "descripción 
 Servicios:
 ${serviceList}`;
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      response_format: { type: 'json_object' },
-      temperature: 0.5,
-    }),
-  });
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: 0.5,
+        },
+      }),
+    }
+  );
 
   if (!response.ok) {
     const err = await response.text();
@@ -92,7 +92,7 @@ ${serviceList}`;
   }
 
   const data = await response.json();
-  const content = data.choices?.[0]?.message?.content || '{}';
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
 
   try {
     const notes = JSON.parse(content);
