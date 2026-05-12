@@ -3,7 +3,7 @@
 import { useState, useMemo, useRef } from 'react';
 import { Estimate, EstimateRow, CatalogService, EstimateStatus, CompanyProfile } from '@/types';
 import { saveEstimateRows, updateEstimateStatus, updateEstimateInfo } from '@/app/actions';
-import { Plus, GripVertical, Trash2, Printer, CheckCircle2, ChevronUp, ChevronDown } from 'lucide-react';
+import { Plus, GripVertical, Trash2, Printer, CheckCircle2, ChevronUp, ChevronDown, Sparkles } from 'lucide-react';
 import EstimatePDFPreview from './EstimatePDFPreview';
 
 export default function EstimateEditor({ 
@@ -24,6 +24,8 @@ export default function EstimateEditor({
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [dragNode_] = useState<HTMLDivElement | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translateDone, setTranslateDone] = useState(false);
   const dragNode = useRef<HTMLDivElement | null>(dragNode_);
 
   // Totals recalc
@@ -108,6 +110,26 @@ export default function EstimateEditor({
     setIsSaving(true);
     await saveEstimateRows(estimate.id, rows);
     setIsSaving(false);
+  };
+
+  const handleTranslateForClient = async () => {
+    setIsTranslating(true);
+    setTranslateDone(false);
+    try {
+      const res = await fetch('/api/translate-for-client', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows }),
+      });
+      const { notes } = await res.json();
+      if (notes) {
+        setRows(rows.map(r => notes[r.id] ? { ...r, client_note: notes[r.id] } : r));
+        setTranslateDone(true);
+        setTimeout(() => setTranslateDone(false), 3000);
+      }
+    } finally {
+      setIsTranslating(false);
+    }
   };
 
   const handleStatusChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -256,12 +278,26 @@ export default function EstimateEditor({
                   className={`grid grid-cols-[30px_1fr_120px_60px_100px_80px_100px_30px] gap-3 p-2 items-center hover:bg-zinc-50/80 group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
                 >
                    <div className="text-center cursor-grab active:cursor-grabbing text-zinc-200 hover:text-zinc-400 flex justify-center"><GripVertical size={16}/></div>
-                   <input 
-                      className="font-medium text-zinc-900 bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-md px-2 py-1.5 placeholder:text-zinc-300 transition w-full"
-                      value={row.service_name_snapshot || ''}
-                      onChange={(e) => updateRow(row.id, { service_name_snapshot: e.target.value })}
-                      placeholder="Descripción del ítem..."
-                    />
+                   <div className="flex flex-col gap-1">
+                     <input 
+                        className="font-medium text-zinc-900 bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-md px-2 py-1.5 placeholder:text-zinc-300 transition w-full"
+                        value={row.service_name_snapshot || ''}
+                        onChange={(e) => updateRow(row.id, { service_name_snapshot: e.target.value })}
+                        placeholder="Descripción del ítem..."
+                      />
+                      <textarea
+                        className="text-xs text-zinc-500 bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-300 focus:ring-1 focus:ring-blue-100 rounded-md px-2 py-1 placeholder:text-zinc-300 transition w-full resize-none mt-0.5 leading-relaxed"
+                        rows={1}
+                        value={row.client_note || ''}
+                        onChange={(e) => updateRow(row.id, { client_note: e.target.value })}
+                        placeholder="Nota para el cliente (opcional)..."
+                        onInput={(e) => {
+                          const t = e.target as HTMLTextAreaElement;
+                          t.style.height = 'auto';
+                          t.style.height = t.scrollHeight + 'px';
+                        }}
+                      />
+                   </div>
                     <select 
                       className="text-xs rounded-md border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 bg-zinc-50 text-zinc-600 truncate py-1.5 px-2 font-medium transition cursor-pointer"
                       onChange={(e) => applyService(row.id, e.target.value)}
@@ -340,7 +376,7 @@ export default function EstimateEditor({
           </div>
 
           {/* Quick Add Buttons */}
-          <div className="p-4 bg-zinc-50 border-t border-zinc-100 flex gap-3 items-center">
+          <div className="p-4 bg-zinc-50 border-t border-zinc-100 flex gap-3 items-center flex-wrap">
             <button onClick={addServiceRow} className="flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border border-blue-100">
               <Plus size={18} /> Añadir Línea
             </button>
@@ -364,6 +400,19 @@ export default function EstimateEditor({
                 <option value="__custom__">— Sección personalizada</option>
               </select>
             </div>
+            {/* AI Translate button */}
+            <button
+              onClick={handleTranslateForClient}
+              disabled={isTranslating}
+              className={`ml-auto flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border ${
+                translateDone
+                  ? 'bg-green-50 text-green-700 border-green-200'
+                  : 'bg-violet-50 text-violet-700 hover:bg-violet-100 border-violet-200'
+              }`}
+            >
+              <Sparkles size={16} />
+              {isTranslating ? 'Generando...' : translateDone ? '✓ Notas generadas' : 'Adaptar para cliente'}
+            </button>
           </div>
         </div>
 
