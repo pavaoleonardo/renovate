@@ -1,14 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+
+const RATE_LIMIT = 10;        // max calls per window
+const WINDOW_MINUTES = 60;    // rolling window in minutes
 
 export async function POST(req: NextRequest) {
-  const { rows } = await req.json();
+  const supabase = createClient();
 
+  // ── 1. Auth check ──────────────────────────────────────────────
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Get company_id for this user
+  const { data: userRecord } = await supabase
+    .from('users')
+    .select('company_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!userRecord?.company_id) {
+    return NextResponse.json({ error: 'Company not found' }, { status: 403 });
+  }
+
+  const companyId = userRecord.company_id;
+  const endpoint = 'translate-for-client';
+  const windowStart = new Date(Date.now() - WINDOW_MINUTES * 60 * 1000).toISOString();
+
+  // ── 2. Rate limit check ────────────────────────────────────────
+  const { count } = await supabase
+    .from('ai_rate_limits')
+    .select('*', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .eq('endpoint', endpoint)
+    .gte('called_at', windowStart);
+
+  if ((count ?? 0) >= RATE_LIMIT) {
+    return NextResponse.json(
+      { error: `Límite alcanzado: máximo ${RATE_LIMIT} usos por hora. Inténtalo más tarde.` },
+      { status: 429 }
+    );
+  }
+
+  // ── 3. Record this call ────────────────────────────────────────
+  await supabase.from('ai_rate_limits').insert({ company_id: companyId, endpoint });
+
+  // ── 4. OpenAI call ─────────────────────────────────────────────
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: 'OpenAI API key not configured' }, { status: 500 });
   }
 
-  // Build a prompt with all technical service names
+  const { rows } = await req.json();
+
   const serviceList = rows
     .filter((r: { type: string; service_name_snapshot: string }) => r.type === 'item' && r.service_name_snapshot)
     .map((r: { id: string; service_name_snapshot: string }, i: number) => `${i + 1}. [id:${r.id}] ${r.service_name_snapshot}`)
@@ -48,7 +93,7 @@ ${serviceList}`;
 
   const data = await response.json();
   const content = data.choices?.[0]?.message?.content || '{}';
-  
+
   try {
     const notes = JSON.parse(content);
     return NextResponse.json({ notes });
