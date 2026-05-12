@@ -40,10 +40,14 @@ export async function getCompanyProfile(): Promise<CompanyProfile | null> {
 
 export async function createEstimate(client_name: string, property_address: string) {
   const supabase = createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
   
   const { data: userRecord } = await supabase
     .from('users')
     .select('company_id')
+    .eq('id', user.id)
     .single();
     
   if (!userRecord?.company_id) throw new Error("Could not identify user's company.");
@@ -207,10 +211,14 @@ export async function searchCatalog(): Promise<CatalogService[]> {
 
 export async function addPhaseAndServices(phases: Omit<CatalogPhase, 'id'>[], phaseServicesMap: Record<number, Omit<CatalogService, 'id' | 'phase_id'>[]>) {
   const supabase = createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
   
   const { data: userRecord } = await supabase
     .from('users')
     .select('company_id')
+    .eq('id', user.id)
     .single();
     
   if (!userRecord?.company_id) throw new Error("Could not identify user's company.");
