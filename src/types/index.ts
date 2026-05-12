@@ -52,4 +52,5 @@ export interface CompanyProfile {
   contact_phone: string | null;
   address: string | null;
   cif: string | null;
+  logo_url: string | null;
 }

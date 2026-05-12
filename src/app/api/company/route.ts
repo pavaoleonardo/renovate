@@ -54,6 +54,7 @@ export async function PUT(request: Request) {
       contact_phone: body.contact_phone,
       address: body.address,
       cif: body.cif,
+      logo_url: body.logo_url,
     })
     .eq('id', userRecord.company_id);
 

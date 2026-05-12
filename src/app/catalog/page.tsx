@@ -1,13 +1,28 @@
 'use client'
 
-import { useState } from 'react'
-import { processExcelUpload } from './actions'
-import { UploadCloud, CheckCircle2, AlertCircle } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { processExcelUpload, searchCatalog } from './actions'
+import { UploadCloud, CheckCircle2, AlertCircle, RefreshCw, Box } from 'lucide-react'
+import { CatalogService } from '@/types'
+
 
 export default function CatalogUpload() {
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<{ success: boolean; message?: string; error?: string } | null>(null)
+  const [services, setServices] = useState<CatalogService[]>([])
+  const [loadingCatalog, setLoadingCatalog] = useState(true)
+
+  const fetchCatalog = async () => {
+    setLoadingCatalog(true)
+    const data = await searchCatalog()
+    setServices(data || [])
+    setLoadingCatalog(false)
+  }
+
+  useEffect(() => {
+    fetchCatalog()
+  }, [])
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -22,8 +37,19 @@ export default function CatalogUpload() {
     const res = await processExcelUpload(formData)
     setResult(res)
     setLoading(false)
-    if (res.success) setFile(null)
+    if (res.success) {
+      setFile(null)
+      fetchCatalog() // Refresh the list after successful upload
+    }
   }
+
+  // Group services by phase
+  const groupedServices = services.reduce((acc, service) => {
+    const phaseName = service.phase_name || 'Sin categoría'
+    if (!acc[phaseName]) acc[phaseName] = []
+    acc[phaseName].push(service)
+    return acc
+  }, {} as Record<string, CatalogService[]>)
 
   return (
     <div className="max-w-2xl mx-auto py-12 px-4">
@@ -87,6 +113,50 @@ M2.      | SOLERA HASTA 5CM             |      |  |  |  | 18.82`}
             El sistema detecta filas con la palabra &quot;Fase&quot; como secciones. Las demás filas se leen como: Col A = Unidad, Col B = Nombre del Servicio, Col G = Precio.
           </p>
         </div>
+      </div>
+
+      <div className="mt-12 mb-8 flex items-center justify-between">
+        <h2 className="text-2xl font-extrabold text-zinc-900 tracking-tight flex items-center gap-2">
+          <Box size={24} className="text-blue-600" /> Mi Catálogo Actual
+        </h2>
+        <button 
+          onClick={fetchCatalog}
+          className="p-2 text-zinc-400 hover:text-zinc-900 transition hover:bg-zinc-100 rounded-full"
+          title="Actualizar catálogo"
+        >
+          <RefreshCw size={20} className={loadingCatalog ? "animate-spin" : ""} />
+        </button>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 overflow-hidden">
+        {loadingCatalog ? (
+          <div className="p-8 text-center text-zinc-500 font-medium animate-pulse">Cargando catálogo...</div>
+        ) : services.length === 0 ? (
+          <div className="p-12 text-center text-zinc-500 font-medium">No hay servicios en el catálogo. Sube un archivo Excel para empezar.</div>
+        ) : (
+          <div className="divide-y divide-zinc-100">
+            {Object.entries(groupedServices).map(([phaseName, phaseServices]) => (
+              <div key={phaseName}>
+                <div className="bg-zinc-50 px-6 py-3 border-b border-zinc-100 sticky top-0">
+                  <h3 className="font-bold text-zinc-800 uppercase tracking-wider text-xs">{phaseName}</h3>
+                </div>
+                <div className="divide-y divide-zinc-50">
+                  {phaseServices.map(service => (
+                    <div key={service.id} className="px-6 py-3 flex items-center justify-between hover:bg-zinc-50 transition group">
+                      <div>
+                        <div className="font-medium text-zinc-900 text-sm">{service.name}</div>
+                        <div className="text-xs font-bold text-zinc-400 uppercase mt-0.5">{service.unit}</div>
+                      </div>
+                      <div className="font-bold text-zinc-900 tabular-nums">
+                        {service.base_price.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
