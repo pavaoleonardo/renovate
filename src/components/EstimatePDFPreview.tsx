@@ -109,12 +109,19 @@ export default function EstimatePDFPreview({
         <div className="p-12 pb-8">
           <div className="flex justify-between items-start mb-12">
             <div>
-              <h1 className="text-3xl font-black tracking-tight text-zinc-900">
-                {company?.name || 'RENOVATE'}<span className="text-blue-600">.</span>
-              </h1>
-              <p className="text-sm text-zinc-400 font-bold uppercase tracking-widest mt-1">
-                Servicios de Reforma
-              </p>
+              {company?.logo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={company.logo_url} alt="Company Logo" className="h-16 object-contain" />
+              ) : (
+                <>
+                  <h1 className="text-3xl font-black tracking-tight text-zinc-900">
+                    {company?.name || 'RENOVATE'}<span className="text-blue-600">.</span>
+                  </h1>
+                  <p className="text-sm text-zinc-400 font-bold uppercase tracking-widest mt-1">
+                    Servicios de Reforma
+                  </p>
+                </>
+              )}
             </div>
             <div className="text-right">
               <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Presupuesto Nº</div>
