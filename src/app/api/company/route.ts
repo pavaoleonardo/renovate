@@ -3,13 +3,23 @@ import { NextResponse } from 'next/server';
 
 export async function GET() {
   const supabase = createClient();
-  const { data: user } = await supabase.from('users').select('company_id').single();
-  if (!user?.company_id) return NextResponse.json(null);
+
+  // Auth check
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { data: userRecord } = await supabase
+    .from('users')
+    .select('company_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!userRecord?.company_id) return NextResponse.json(null);
 
   const { data } = await supabase
     .from('companies')
     .select('*')
-    .eq('id', user.company_id)
+    .eq('id', userRecord.company_id)
     .single();
 
   return NextResponse.json(data);
@@ -17,11 +27,24 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   const supabase = createClient();
+
+  // Auth check
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { data: userRecord } = await supabase
+    .from('users')
+    .select('company_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!userRecord?.company_id) {
+    return NextResponse.json({ error: 'No company found' }, { status: 400 });
+  }
+
   const body = await request.json();
 
-  const { data: user } = await supabase.from('users').select('company_id').single();
-  if (!user?.company_id) return NextResponse.json({ error: 'No company found' }, { status: 400 });
-
+  // Whitelist allowed fields — never pass raw body to DB
   const { error } = await supabase
     .from('companies')
     .update({
@@ -32,7 +55,7 @@ export async function PUT(request: Request) {
       address: body.address,
       cif: body.cif,
     })
-    .eq('id', user.company_id);
+    .eq('id', userRecord.company_id);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });
