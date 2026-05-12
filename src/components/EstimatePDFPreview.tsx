@@ -171,8 +171,13 @@ export default function EstimatePDFPreview({
 
               const rowTotal = (row.price_snapshot || 0) * (row.quantity || 0);
               return (
-                <div key={row.id} className="grid grid-cols-[1fr_70px_100px_60px_110px] gap-4 py-3.5 text-sm items-center break-inside-avoid">
-                  <div className="font-medium text-zinc-800 leading-snug">{row.service_name_snapshot || '—'}</div>
+                <div key={row.id} className="grid grid-cols-[1fr_70px_100px_60px_110px] gap-4 py-3.5 text-sm items-start break-inside-avoid">
+                  <div>
+                    <p className="font-medium text-zinc-800 leading-snug">{row.service_name_snapshot || '—'}</p>
+                    {row.client_note && (
+                      <p className="text-xs text-zinc-500 mt-1 leading-relaxed">{row.client_note}</p>
+                    )}
+                  </div>
                   <div className="text-center text-[11px] font-black text-zinc-400 uppercase">{row.unit_snapshot || ''}</div>
                   <div className="text-right tabular-nums text-zinc-600 font-medium">{fmt(row.price_snapshot || 0)}</div>
                   <div className="text-center font-bold text-zinc-900">{row.quantity || 0}</div>
