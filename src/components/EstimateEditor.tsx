@@ -26,6 +26,7 @@ export default function EstimateEditor({
   const [showPreview, setShowPreview] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const [translateDone, setTranslateDone] = useState(false);
+  const [translateError, setTranslateError] = useState<string | null>(null);
   const dragNode = useRef<HTMLDivElement | null>(dragNode_);
 
   // Totals recalc
@@ -115,18 +116,25 @@ export default function EstimateEditor({
   const handleTranslateForClient = async () => {
     setIsTranslating(true);
     setTranslateDone(false);
+    setTranslateError(null);
     try {
       const res = await fetch('/api/translate-for-client', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rows }),
       });
-      const { notes } = await res.json();
-      if (notes) {
-        setRows(rows.map(r => notes[r.id] ? { ...r, client_note: notes[r.id] } : r));
+      const json = await res.json();
+      if (!res.ok) {
+        setTranslateError(json.error || 'Error al generar notas');
+        return;
+      }
+      if (json.notes) {
+        setRows(rows.map(r => json.notes[r.id] ? { ...r, client_note: json.notes[r.id] } : r));
         setTranslateDone(true);
         setTimeout(() => setTranslateDone(false), 3000);
       }
+    } catch {
+      setTranslateError('Error de conexión. Inténtalo de nuevo.');
     } finally {
       setIsTranslating(false);
     }
@@ -400,19 +408,24 @@ export default function EstimateEditor({
                 <option value="__custom__">— Sección personalizada</option>
               </select>
             </div>
-            {/* AI Translate button */}
-            <button
-              onClick={handleTranslateForClient}
-              disabled={isTranslating}
-              className={`ml-auto flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border ${
-                translateDone
-                  ? 'bg-green-50 text-green-700 border-green-200'
-                  : 'bg-violet-50 text-violet-700 hover:bg-violet-100 border-violet-200'
-              }`}
-            >
-              <Sparkles size={16} />
-              {isTranslating ? 'Generando...' : translateDone ? '✓ Notas generadas' : 'Adaptar para cliente'}
-            </button>
+            {/* AI Translate button + error */}
+            <div className="ml-auto flex flex-col items-end gap-1">
+              <button
+                onClick={handleTranslateForClient}
+                disabled={isTranslating}
+                className={`flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border ${
+                  translateDone
+                    ? 'bg-green-50 text-green-700 border-green-200'
+                    : 'bg-violet-50 text-violet-700 hover:bg-violet-100 border-violet-200'
+                }`}
+              >
+                <Sparkles size={16} />
+                {isTranslating ? 'Generando...' : translateDone ? '✓ Notas generadas' : 'Adaptar para cliente'}
+              </button>
+              {translateError && (
+                <p className="text-xs text-red-500 font-medium text-right max-w-[260px]">{translateError}</p>
+              )}
+            </div>
           </div>
         </div>
 
