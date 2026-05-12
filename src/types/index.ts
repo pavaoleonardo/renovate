@@ -24,7 +24,7 @@ export interface EstimateRow {
   price_snapshot: number | null;
   
   // Client-facing description (plain language note for the PDF)
-  client_note: string | null;
+  client_note?: string | null;
 
   quantity: number;
   total: number;
