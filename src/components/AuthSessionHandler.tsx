@@ -30,16 +30,17 @@ export default function AuthSessionHandler() {
       const code = url.searchParams.get('code')
       const hasHashToken = window.location.hash.includes('access_token')
 
-      let established = false
+      const hasLink = Boolean(code) || hasHashToken
+      let linkFailed = false
 
       // 1. PKCE flow: exchange the one-time code for a session cookie.
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code)
+        linkFailed = Boolean(error)
 
         // Remove the (now consumed) code so a reload can't reuse it.
         url.searchParams.delete('code')
         window.history.replaceState({}, '', url.pathname + url.search)
-        established = !error
       }
 
       // 2. Read the session (also lets supabase-js finish parsing the URL hash).
@@ -53,19 +54,25 @@ export default function AuthSessionHandler() {
       if (hasHashToken) {
         // Tokens are single-use: strip them from the address bar.
         window.history.replaceState({}, '', url.pathname + url.search)
-        established = true
       }
 
       if (cancelled) return
 
-      if (!session) {
-        // A link was present but produced no session -> it expired or was reused.
-        if (established) setStatus('missing')
+      // A consumed or expired link must NEVER fall back to a session left over from
+      // an earlier login: GoTrue refuses password changes from sessions older than
+      // 24h ("Password update requires reauthentication" / reauthentication_needed),
+      // which is a confusing error for someone resetting a password. Clear the stale
+      // session so the user gets an actionable message instead.
+      if (hasLink && (linkFailed || !session)) {
+        await supabase.auth.signOut()
+        if (!cancelled) setStatus('missing')
         return
       }
 
-      // Session cookie is now set client-side: re-render server components with it.
-      if (established) router.refresh()
+      if (hasLink) {
+        // Fresh session cookie is now set client-side: re-render server components.
+        router.refresh()
+      }
     }
 
     establishSession()
@@ -81,7 +88,7 @@ export default function AuthSessionHandler() {
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
           <p className="font-bold text-amber-900 text-sm">Enlace caducado o ya utilizado</p>
           <p className="text-amber-800 text-xs mt-1">
-            Solicita un enlace nuevo para continuar.
+            Pide un enlace nuevo desde «¿Olvidaste tu contraseña?» y ábrelo en este mismo navegador.
           </p>
         </div>
       </div>

@@ -24,6 +24,15 @@ function authErrorMessage(message: string): string {
   if (m.includes('auth session missing')) {
     return 'El enlace ha caducado o no es válido. Solicita uno nuevo.'
   }
+  if (m.includes('reauthentication') || m.includes('nonce')) {
+    return 'Por seguridad, tu sesión es demasiado antigua para cambiar la contraseña. Pide un enlace nuevo y ábrelo en este mismo navegador.'
+  }
+  if (m.includes('current password')) {
+    return 'Debes indicar tu contraseña actual para poder cambiarla.'
+  }
+  if (m.includes('should be different from the old password')) {
+    return 'La nueva contraseña debe ser distinta de la anterior.'
+  }
   if (m.includes('email rate limit') || m.includes('rate limit')) {
     return 'Se han enviado demasiados correos. Espera unos minutos e inténtalo de nuevo.'
   }
@@ -115,6 +124,15 @@ export async function updatePassword(formData: FormData) {
   const { error } = await supabase.auth.updateUser({ password })
 
   if (error) {
+    // If the project enables "Require reauthentication when changing password",
+    // GoTrue refuses a password change from any session created more than 24h ago
+    // (ErrorCodeReauthenticationNeeded). That means the request carried a session
+    // left over from an earlier login, not the fresh recovery session, so drop it
+    // and send the user back to request a new link.
+    if (error.message.toLowerCase().includes('reauthentication')) {
+      await supabase.auth.signOut()
+    }
+
     return redirect(`/auth/reset-password?message=${encodeURIComponent(authErrorMessage(error.message))}`)
   }
 
