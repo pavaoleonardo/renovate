@@ -4,6 +4,7 @@ import './globals.css';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { signOut } from './login/actions';
+import AuthSessionHandler from '@/components/AuthSessionHandler';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
@@ -23,7 +24,8 @@ export default async function RootLayout({
   return (
     <html lang="es" className={`${inter.variable} font-sans antialiased`}>
       <body className="bg-zinc-50 min-h-screen border-t-4 border-blue-600">
-        
+        <AuthSessionHandler />
+
         {/* Global Nav MVP */}
         <nav className="bg-white border-b border-zinc-200 shadow-sm sticky top-0 z-40">
           <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
