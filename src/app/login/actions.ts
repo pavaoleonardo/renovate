@@ -4,6 +4,45 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 
+/**
+ * Turns a raw Supabase Auth error into a clear, actionable Spanish message.
+ * Without this the UI only ever showed "Could not authenticate user", which hid
+ * the real reason (e.g. "Email not confirmed" or "Auth session missing!").
+ */
+function authErrorMessage(message: string): string {
+  const m = (message || '').toLowerCase()
+
+  if (m.includes('invalid login credentials')) {
+    return 'Correo o contraseña incorrectos.'
+  }
+  if (m.includes('email not confirmed')) {
+    return 'Tu correo aún no está confirmado. Revisa tu bandeja de entrada y la carpeta de spam.'
+  }
+  if (m.includes('user already registered')) {
+    return 'Ese correo ya tiene una cuenta. Inicia sesión o recupera tu contraseña.'
+  }
+  if (m.includes('auth session missing')) {
+    return 'El enlace ha caducado o no es válido. Solicita uno nuevo.'
+  }
+  if (m.includes('email rate limit') || m.includes('rate limit')) {
+    return 'Se han enviado demasiados correos. Espera unos minutos e inténtalo de nuevo.'
+  }
+  if (m.includes('for security purposes')) {
+    return 'Por seguridad, espera unos segundos antes de volver a intentarlo.'
+  }
+  if (m.includes('password should be at least')) {
+    return 'La contraseña debe tener al menos 6 caracteres.'
+  }
+  if (m.includes('unable to validate email') || m.includes('invalid format')) {
+    return 'El correo electrónico no es válido.'
+  }
+  if (m.includes('signups not allowed') || m.includes('signup is disabled')) {
+    return 'El registro está desactivado en este momento.'
+  }
+
+  return message
+}
+
 export async function login(formData: FormData) {
   const email = formData.get('email') as string
   const password = formData.get('password') as string
@@ -15,7 +54,7 @@ export async function login(formData: FormData) {
   })
 
   if (error) {
-    return redirect('/login?message=Could not authenticate user')
+    return redirect(`/login?message=${encodeURIComponent(authErrorMessage(error.message))}`)
   }
 
   revalidatePath('/', 'layout')
@@ -35,7 +74,7 @@ export async function signup(formData: FormData) {
   })
 
   if (error) {
-    return redirect('/login?message=Could not sign up user')
+    return redirect(`/login?message=${encodeURIComponent(authErrorMessage(error.message))}`)
   }
 
   // 2. We should technically wrap this in a trigger or RCP on Supabase side,
@@ -63,7 +102,7 @@ export async function forgotPassword(formData: FormData) {
   })
 
   if (error) {
-    return redirect(`/login/forgot-password?message=${encodeURIComponent(error.message)}`)
+    return redirect(`/login/forgot-password?message=${encodeURIComponent(authErrorMessage(error.message))}`)
   }
 
   return redirect('/login/forgot-password?message=Check your email for a password reset link')
@@ -76,7 +115,7 @@ export async function updatePassword(formData: FormData) {
   const { error } = await supabase.auth.updateUser({ password })
 
   if (error) {
-    return redirect('/auth/reset-password?message=Error updating password')
+    return redirect(`/auth/reset-password?message=${encodeURIComponent(authErrorMessage(error.message))}`)
   }
 
   revalidatePath('/', 'layout')
