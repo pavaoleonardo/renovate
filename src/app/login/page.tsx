@@ -28,17 +28,20 @@ export default function LoginPage({
           required
         />
 
-        <label className="text-md font-bold" htmlFor="password">
-          Contraseña
-        </label>
-        <PasswordInput name="password" required />
-
-
-        <div className="flex justify-end mt-1 mb-4">
-          <Link href="/login/forgot-password" className="text-sm text-blue-600 hover:text-blue-700 font-semibold transition">
+        {/* Label + recovery link share one row: nothing can overlap the input. */}
+        <div className="flex items-baseline justify-between gap-2">
+          <label className="text-md font-bold" htmlFor="password">
+            Contraseña
+          </label>
+          <Link
+            href="/login/forgot-password"
+            className="text-sm text-blue-600 hover:text-blue-700 font-semibold transition whitespace-nowrap"
+          >
             ¿Olvidaste tu contraseña?
           </Link>
         </div>
+
+        <PasswordInput name="password" required className="mb-4" />
 
         <button
           formAction={login}
