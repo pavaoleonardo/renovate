@@ -30,6 +30,8 @@ export interface EstimateRow {
   total: number;
 }
 
+export type CatalogUnit = 'm2' | 'ml' | 'm3' | 'ud' | 'vg' | 'h' | 'kg';
+
 export interface CatalogService {
   id: string;
   name: string;
@@ -37,6 +39,14 @@ export interface CatalogService {
   base_price: number;
   phase_id: string;
   phase_name?: string;
+  /** Metadata used by the default catalog and by future Excel / BC3 round-trips. */
+  code?: string | null;
+  description?: string | null;
+  /** Market band shown as a hint when reviewing a price. */
+  price_min?: number | null;
+  price_max?: number | null;
+  /** 'catalogo_base' | 'excel' | 'manual' */
+  origin?: string | null;
 }
 
 export interface CatalogPhase {

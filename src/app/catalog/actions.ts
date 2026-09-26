@@ -2,9 +2,25 @@
 
 import * as xlsx from 'xlsx'
 import { CatalogService, CatalogPhase } from '@/types'
-
-// For MVP mock updates:
 import { addPhaseAndServices } from '@/app/actions'
+import { catalogErrorMessage } from '@/lib/catalog-errors'
+import { createClient } from '@/lib/supabase/server'
+import { revalidatePath } from 'next/cache'
+
+/** Resolves the company of the authenticated user (null when not found). */
+async function getCompanyId(): Promise<string | null> {
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const { data: userRecord } = await supabase
+    .from('users')
+    .select('company_id')
+    .eq('id', user.id)
+    .single()
+
+  return (userRecord?.company_id as string) ?? null
+}
 
 export async function processExcelUpload(formData: FormData) {
   console.log('--- Iniciando procesamiento de Excel ---')
@@ -130,11 +146,15 @@ export async function processExcelUpload(formData: FormData) {
       throw new Error('No se encontraron fases en el archivo. Asegúrate de que incluir la palabra "Fase" (ej: "Fase 1: Demolición").')
     }
 
-    // Clear old catalog data before importing new
-    try {
-      await clearCatalog()
-    } catch (err) {
-      console.error('Error limpiando catálogo anterior:', err)
+    // Replace by default (wipes the company's catalog first); 'merge' appends
+    const mode = (formData.get('mode') as string) === 'merge' ? 'merge' : 'replace'
+
+    if (mode === 'replace') {
+      try {
+        await clearCatalog()
+      } catch (err) {
+        console.error('Error limpiando catálogo anterior:', err)
+      }
     }
 
     try {
@@ -161,12 +181,105 @@ export async function processExcelUpload(formData: FormData) {
 }
 
 export async function clearCatalog() {
-  const { createClient } = await import('@/lib/supabase/server')
   const supabase = createClient()
-  
-  // Delete services first (foreign key), then phases
-  await supabase.from('catalog_services').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-  await supabase.from('catalog_phases').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-  
+  const companyId = await getCompanyId()
+  if (!companyId) return { success: false, error: 'No se encontró la empresa del usuario.' }
+
+  // Scope explicitly by company: never rely on RLS alone for a bulk delete.
+  const { data: phases } = await supabase.from('catalog_phases').select('id').eq('company_id', companyId)
+  const phaseIds = (phases || []).map((p: { id: string }) => p.id)
+
+  if (phaseIds.length > 0) {
+    await supabase.from('catalog_services').delete().in('phase_id', phaseIds)
+  }
+  await supabase.from('catalog_phases').delete().eq('company_id', companyId)
+
+  revalidatePath('/catalog')
   return { success: true }
+}
+
+/** Inline edit of one of the company's catalog services. */
+export async function updateCatalogService(
+  id: string,
+  updates: { name?: string; unit?: string; base_price?: number; description?: string | null }
+) {
+  const supabase = createClient()
+
+  const clean: Record<string, unknown> = {}
+  if (updates.name !== undefined) clean.name = updates.name.trim()
+  if (updates.unit !== undefined) clean.unit = updates.unit.trim() || 'ud'
+  if (updates.base_price !== undefined) clean.base_price = updates.base_price
+  if (updates.description !== undefined) clean.description = updates.description
+
+  if (Object.keys(clean).length === 0) return { success: true }
+
+  const { error } = await supabase.from('catalog_services').update(clean).eq('id', id)
+  if (error) return { success: false, error: catalogErrorMessage(error.message) }
+
+  revalidatePath('/catalog')
+  revalidatePath('/estimates')
+  return { success: true }
+}
+
+export async function deleteCatalogService(id: string) {
+  const supabase = createClient()
+
+  const { error } = await supabase.from('catalog_services').delete().eq('id', id)
+  if (error) return { success: false, error: catalogErrorMessage(error.message) }
+
+  revalidatePath('/catalog')
+  revalidatePath('/estimates')
+  return { success: true }
+}
+
+export async function addCatalogService(phaseId: string, service: { name: string; unit: string; base_price: number }) {
+  const supabase = createClient()
+
+  const { error } = await supabase.from('catalog_services').insert({
+    phase_id: phaseId,
+    name: service.name.trim() || 'Nuevo servicio',
+    unit: service.unit.trim() || 'ud',
+    base_price: service.base_price,
+    origin: 'manual',
+  })
+
+  if (error) return { success: false, error: catalogErrorMessage(error.message) }
+
+  revalidatePath('/catalog')
+  revalidatePath('/estimates')
+  return { success: true }
+}
+
+export async function createCatalogPhase(name: string) {
+  const supabase = createClient()
+  const companyId = await getCompanyId()
+  if (!companyId) return { success: false, error: 'No se encontró la empresa del usuario.' }
+
+  const { count } = await supabase
+    .from('catalog_phases')
+    .select('*', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+
+  const { data, error } = await supabase
+    .from('catalog_phases')
+    .insert({ name: name.trim() || 'Nueva fase', company_id: companyId, order_index: count ?? 0 })
+    .select('id, name')
+    .single()
+
+  if (error || !data) return { success: false, error: catalogErrorMessage(error?.message) }
+
+  revalidatePath('/catalog')
+  return { success: true, phase: data as { id: string; name: string } }
+}
+
+/** Phases of the company (including empty ones), for the phase selectors. */
+export async function listCatalogPhases(): Promise<{ id: string; name: string }[]> {
+  const supabase = createClient()
+
+  const { data } = await supabase
+    .from('catalog_phases')
+    .select('id, name, order_index')
+    .order('order_index', { ascending: true })
+
+  return (data || []).map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))
 }
