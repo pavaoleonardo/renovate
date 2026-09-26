@@ -73,27 +73,36 @@ export async function login(formData: FormData) {
 export async function signup(formData: FormData) {
   const email = formData.get('email') as string
   const password = formData.get('password') as string
-// const companyName = formData.get('companyName') as string
+  const confirmPassword = formData.get('confirmPassword') as string
+  const companyName = ((formData.get('companyName') as string) || '').trim()
   const supabase = createClient()
+
+  // Only validate when the signup form actually sent the confirmation field.
+  if (confirmPassword && password !== confirmPassword) {
+    return redirect(`/login/signup?message=${encodeURIComponent('Las contraseñas no coinciden.')}`)
+  }
 
   // 1. Create User
   const { error } = await supabase.auth.signUp({
     email,
     password,
+    options: {
+      // Read by the handle_new_user() trigger to name the new company
+      // (see supabase/migrations/20260926000000_company_name_from_signup.sql).
+      data: { company_name: companyName || null },
+    },
   })
 
   if (error) {
-    return redirect(`/login?message=${encodeURIComponent(authErrorMessage(error.message))}`)
+    return redirect(`/login/signup?message=${encodeURIComponent(authErrorMessage(error.message))}`)
   }
 
-  // 2. We should technically wrap this in a trigger or RCP on Supabase side,
-  // but for MVP we do it from the server since the user was created.
-  // NOTE: RLS might block this if the authenticated session isn't immediately active 
-  // or we don't bypass RLS. For MVP sake, let's keep it simple and redirect.
-  // The actual company info setup can be hooked via DB Triggers on auth.users insert.
+  // 2. The company + public.users rows are created by the on_auth_user_created
+  // trigger, so nothing else is needed here. The user still has to confirm their
+  // email (Supabase "Confirm email" setting) before they can sign in.
 
   revalidatePath('/', 'layout')
-  redirect('/login?message=Check your email to continue sign in process')
+  redirect('/login/signup?message=Check your email to confirm your account')
 }
 
 export async function signOut() {

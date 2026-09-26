@@ -5,6 +5,7 @@ import { Eye, EyeOff } from "lucide-react";
 
 interface PasswordInputProps {
   name: string;
+  id?: string;
   placeholder?: string;
   className?: string;
   minLength?: number;
@@ -13,6 +14,7 @@ interface PasswordInputProps {
 
 export default function PasswordInput({
   name,
+  id,
   placeholder = "••••••••",
   className = "",
   minLength,
@@ -24,6 +26,7 @@ export default function PasswordInput({
     <div className="relative">
       <input
         type={visible ? "text" : "password"}
+        id={id ?? name}
         name={name}
         placeholder={placeholder}
         minLength={minLength}

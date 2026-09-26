@@ -1,4 +1,4 @@
-import { login, signup } from './actions'
+import { login } from './actions'
 import Link from 'next/link'
 import PasswordInput from '@/components/PasswordInput'
 
@@ -52,12 +52,12 @@ export default function LoginPage({
         >
           Iniciar Sesión
         </button>
-        <button
-          formAction={signup}
-          className="bg-zinc-100 active:scale-[0.98] hover:bg-zinc-200 text-zinc-900 font-bold px-4 py-3 rounded-xl transition mb-2"
+        <Link
+          href="/login/signup"
+          className="bg-zinc-100 active:scale-[0.98] hover:bg-zinc-200 text-zinc-900 font-bold px-4 py-3 rounded-xl transition mb-2 text-center"
         >
           Crear Cuenta
-        </button>
+        </Link>
 
         {searchParams?.message && (
           <p className="mt-4 p-4 bg-zinc-100 text-zinc-600 font-medium text-center rounded-lg text-sm">
