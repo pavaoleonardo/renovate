@@ -2,8 +2,9 @@
 
 import { useState, useMemo, useRef } from 'react';
 import { Estimate, EstimateRow, CatalogService, EstimateStatus, CompanyProfile } from '@/types';
-import { saveEstimateRows, updateEstimateStatus, updateEstimateInfo } from '@/app/actions';
+import { saveEstimateRows, updateEstimateStatus, updateEstimateInfo, updateEstimateTaxRate } from '@/app/actions';
 import { Plus, GripVertical, Trash2, Printer, CheckCircle2, ChevronUp, ChevronDown, Sparkles } from 'lucide-react';
+import { computeTotals, normalizeTaxRate, taxHint, taxLabel, TAX_RATE_OPTIONS } from '@/lib/estimate-totals';
 import EstimatePDFPreview from './EstimatePDFPreview';
 
 export default function EstimateEditor({ 
@@ -27,11 +28,19 @@ export default function EstimateEditor({
   const [isTranslating, setIsTranslating] = useState(false);
   const [translateDone, setTranslateDone] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
+  const [taxError, setTaxError] = useState<string | null>(null);
+  const [isSavingTax, setIsSavingTax] = useState(false);
   const dragNode = useRef<HTMLDivElement | null>(dragNode_);
 
   // Totals recalc
   const calcRowTotal = (r: EstimateRow) => (r.price_snapshot || 0) * (r.quantity || 0);
   const totalAmount = useMemo(() => rows.reduce((acc, r) => acc + calcRowTotal(r), 0), [rows]);
+
+  // Base imponible + the VAT chosen for this budget (0 %, 10 % or 21 %)
+  const totals = useMemo(
+    () => computeTotals(totalAmount, estimate.tax_rate),
+    [totalAmount, estimate.tax_rate]
+  );
 
   // Group catalog by phase
   const catalogByPhase = useMemo(() => {
@@ -146,6 +155,24 @@ export default function EstimateEditor({
     setEstimate(res.estimate);
   };
 
+  const handleTaxRateChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const rate = normalizeTaxRate(e.target.value);
+    const previous = estimate;
+    // Optimistic: the totals in the sticky bar recalc before the round-trip.
+    setEstimate({ ...estimate, tax_rate: rate });
+    setIsSavingTax(true);
+    setTaxError(null);
+    try {
+      const res = await updateEstimateTaxRate(estimate.id, rate);
+      setEstimate(res.estimate);
+    } catch (err) {
+      setEstimate(previous);
+      setTaxError(err instanceof Error ? err.message : 'No se pudo cambiar el IVA.');
+    } finally {
+      setIsSavingTax(false);
+    }
+  };
+
   // Drag & Drop
   const handleDragStart = (index: number, e: React.DragEvent<HTMLDivElement>) => {
     setDragIndex(index);
@@ -228,6 +255,29 @@ export default function EstimateEditor({
               </select>
             </div>
            
+            <div className="flex flex-col items-end">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-bold text-zinc-400 uppercase tracking-wider">IVA</span>
+                <select
+                  value={totals.taxRate}
+                  onChange={handleTaxRateChange}
+                  disabled={isSavingTax}
+                  title={taxHint(totals.taxRate)}
+                  className="border-zinc-200 rounded-lg shadow-sm font-bold bg-white text-zinc-800 py-2 pl-4 pr-10 focus:ring-blue-500 focus:border-blue-500 transition cursor-pointer disabled:opacity-50"
+                >
+                  {TAX_RATE_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-[10px] font-medium text-zinc-400 mt-1">
+                {taxHint(totals.taxRate)}{isSavingTax ? ' · guardando...' : ''}
+              </p>
+              {taxError && (
+                <p className="text-[10px] font-bold text-red-500 mt-1 max-w-[260px] text-right">{taxError}</p>
+              )}
+            </div>
+            
             <button 
               onClick={() => setShowPreview(true)}
               className="flex items-center gap-2 text-zinc-600 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 px-4 py-2 rounded-lg transition font-semibold text-sm w-full md:w-auto justify-center"
@@ -446,19 +496,19 @@ export default function EstimateEditor({
               <div className="text-right">
                 <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">Subtotal</div>
                 <div className="text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
-                  {totalAmount.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+                  {totals.subtotal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">IVA (21%)</div>
+                <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">{taxLabel(totals.taxRate)}</div>
                 <div className="text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
-                  {(totalAmount * 0.21).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+                  {totals.tax.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">Total (con IVA)</div>
+                <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">{totals.taxRate > 0 ? 'Total (con IVA)' : 'Total (sin IVA)'}</div>
                 <div className="text-3xl font-black text-blue-600 tabular-nums tracking-tight">
-                  {(totalAmount * 1.21).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+                  {totals.total.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                 </div>
               </div>
             </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { Estimate, EstimateRow, CompanyProfile } from '@/types';
+import { computeTotals } from '@/lib/estimate-totals';
 import { X, Printer, Mail } from 'lucide-react';
 import { useState } from 'react';
 
@@ -26,8 +27,9 @@ export default function EstimatePDFPreview({
     if (r.type === 'item') return acc + (r.price_snapshot || 0) * (r.quantity || 0);
     return acc;
   }, 0);
-  const iva = subtotal * 0.21;
-  const total = subtotal + iva;
+  // The VAT is whatever this budget was issued with: 21 %, 10 % or none at all.
+  const totals = computeTotals(subtotal, estimate.tax_rate);
+  const vatIncluded = totals.taxRate > 0;
 
   const today = new Date().toLocaleDateString('es-ES', {
     day: '2-digit',
@@ -44,7 +46,7 @@ export default function EstimatePDFPreview({
     setSending(true);
     const subject = encodeURIComponent(`Presupuesto - ${estimate.client_name}`);
     const body = encodeURIComponent(
-      `Estimado/a ${estimate.client_name},\n\nAdjunto le envío el presupuesto para la dirección: ${estimate.property_address}.\n\nImporte total (IVA incluido): ${fmt(total)}\n\nQuedo a su disposición para cualquier consulta.\n\nUn saludo.`
+      `Estimado/a ${estimate.client_name},\n\nAdjunto le envío el presupuesto para la dirección: ${estimate.property_address}.\n\nImporte total ${vatIncluded ? '(IVA incluido)' : '(sin IVA)'}: ${fmt(totals.total)}\n\nQuedo a su disposición para cualquier consulta.\n\nUn saludo.`
     );
     window.open(`mailto:${emailTo}?subject=${subject}&body=${body}`, '_blank');
     setSending(false);
@@ -147,9 +149,11 @@ export default function EstimatePDFPreview({
             <div className="bg-zinc-50 p-6 rounded-lg flex flex-col justify-center">
               <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Presupuesto Estimado</div>
               <div className="text-3xl font-black text-zinc-900 tabular-nums">
-                {fmt(total)}
+                {fmt(totals.total)}
               </div>
-              <div className="text-[10px] text-zinc-400 font-bold mt-1">IVA del 21% INCLUIDO</div>
+              <div className="text-[10px] text-zinc-400 font-bold mt-1">
+                {vatIncluded ? `IVA del ${totals.taxRate}% INCLUIDO` : 'SIN IVA'}
+              </div>
             </div>
           </div>
         </div>
@@ -199,17 +203,21 @@ export default function EstimatePDFPreview({
         <div className="px-12 py-12 break-inside-avoid">
           <div className="flex justify-end border-t-2 border-zinc-900 pt-6">
             <div className="w-80 space-y-3">
-              <div className="flex justify-between text-sm font-bold text-zinc-500">
-                <span>Base Imponible</span>
-                <span className="tabular-nums font-mono">{fmt(subtotal)}</span>
-              </div>
-              <div className="flex justify-between text-sm font-bold text-zinc-500">
-                <span>IVA (21%)</span>
-                <span className="tabular-nums font-mono">{fmt(iva)}</span>
-              </div>
+              {vatIncluded && (
+                <>
+                  <div className="flex justify-between text-sm font-bold text-zinc-500">
+                    <span>Base Imponible</span>
+                    <span className="tabular-nums font-mono">{fmt(totals.subtotal)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm font-bold text-zinc-500">
+                    <span>IVA ({totals.taxRate}%)</span>
+                    <span className="tabular-nums font-mono">{fmt(totals.tax)}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between text-2xl font-black text-zinc-900 border-t border-zinc-100 pt-4">
-                <span>TOTAL</span>
-                <span className="tabular-nums text-blue-600">{fmt(total)}</span>
+                <span>{vatIncluded ? 'TOTAL' : 'TOTAL SIN IVA'}</span>
+                <span className="tabular-nums text-blue-600">{fmt(totals.total)}</span>
               </div>
             </div>
           </div>

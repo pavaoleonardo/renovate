@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { createClient } from '@/lib/supabase/server';
+import { computeTotals, DEFAULT_TAX_RATE } from '@/lib/estimate-totals';
 import {
   ArrowRight,
   Check,
@@ -45,7 +46,7 @@ const FEATURES = [
   {
     icon: FileText,
     title: 'Un PDF que el cliente entiende',
-    text: 'Tu logo, tu CIF y tus datos en la cabecera. Base imponible, IVA y total desglosados, listo para imprimir o enviar por email.',
+    text: 'Tu logo, tu CIF y tus datos en la cabecera. Base imponible, IVA y total desglosados —al 21 %, al 10 % o sin IVA—, listo para imprimir o enviar por email.',
   },
 ];
 
@@ -82,7 +83,12 @@ export default async function Home() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const mockTotal = MOCK_ROWS.reduce((acc, row) => acc + row.total, 0);
+  // Same helper the editor and the PDF use, so the sample can never disagree
+  // with the numbers the app really produces.
+  const mockTotals = computeTotals(
+    MOCK_ROWS.reduce((acc, row) => acc + row.total, 0),
+    DEFAULT_TAX_RATE
+  );
 
   const primaryCta =
     'inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white font-bold px-6 py-3.5 rounded-xl shadow-md transition';
@@ -177,18 +183,18 @@ export default async function Home() {
             <div className="px-5 py-4 bg-zinc-50 border-t border-zinc-100">
               <div className="flex items-center justify-between text-xs font-bold text-zinc-500">
                 <span>Base imponible</span>
-                <span className="tabular-nums">{eur(mockTotal)}</span>
+                <span className="tabular-nums">{eur(mockTotals.subtotal)}</span>
               </div>
               <div className="flex items-center justify-between text-xs font-bold text-zinc-500 mt-1">
-                <span>IVA (21%)</span>
-                <span className="tabular-nums">{eur(mockTotal * 0.21)}</span>
+                <span>IVA ({mockTotals.taxRate}%)</span>
+                <span className="tabular-nums">{eur(mockTotals.tax)}</span>
               </div>
               <div className="flex items-center justify-between mt-3 pt-3 border-t border-zinc-200">
                 <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400">
                   Total
                 </span>
                 <span className="text-xl font-black text-blue-600 tabular-nums">
-                  {eur(mockTotal * 1.21)}
+                  {eur(mockTotals.total)}
                 </span>
               </div>
             </div>
