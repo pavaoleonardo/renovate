@@ -1,51 +1,147 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { processExcelUpload } from './actions'
-import { searchCatalog } from '@/app/actions'
-import { UploadCloud, CheckCircle2, AlertCircle, RefreshCw, Box } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  addCatalogService,
+  createCatalogPhase,
+  deleteCatalogService,
+  listCatalogPhases,
+  processExcelUpload,
+  updateCatalogService,
+} from './actions'
+import { ensureCatalog, searchCatalog, seedDefaultCatalog } from '@/app/actions'
+import { AlertCircle, CheckCircle2, Box, Plus, RefreshCw, Sparkles, Trash2, UploadCloud } from 'lucide-react'
 import { CatalogService } from '@/types'
 
+const UNITS = ['m2', 'ml', 'm3', 'ud', 'kg', 'h', 'vg']
 
-export default function CatalogUpload() {
-  const [file, setFile] = useState<File | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<{ success: boolean; message?: string; error?: string } | null>(null)
+const eur = (value: number) =>
+  value.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 })
+
+export default function CatalogPage() {
   const [services, setServices] = useState<CatalogService[]>([])
-  const [loadingCatalog, setLoadingCatalog] = useState(true)
+  const [phases, setPhases] = useState<{ id: string; name: string }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [file, setFile] = useState<File | null>(null)
+  const [importMode, setImportMode] = useState<'replace' | 'merge'>('replace')
+  const [result, setResult] = useState<{ success: boolean; text: string } | null>(null)
+  const [showAdd, setShowAdd] = useState(false)
+  const [newService, setNewService] = useState({ phaseId: '', name: '', unit: 'ud', price: '' })
 
-  const fetchCatalog = async () => {
-    setLoadingCatalog(true)
-    const data = await searchCatalog()
-    setServices(data || [])
-    setLoadingCatalog(false)
-  }
-
-  useEffect(() => {
-    fetchCatalog()
+  const fetchCatalog = useCallback(async () => {
+    setLoading(true)
+    const [catalog, phaseList] = await Promise.all([searchCatalog(), listCatalogPhases()])
+    setServices(catalog || [])
+    setPhases(phaseList || [])
+    setNewService((prev) => ({ ...prev, phaseId: prev.phaseId || phaseList?.[0]?.id || '' }))
+    setLoading(false)
+    return catalog || []
   }, [])
+
+  // First visit: if the company has no catalog yet, load the default one.
+  useEffect(() => {
+    ;(async () => {
+      const existing = await fetchCatalog()
+      if (existing.length === 0) {
+        const seeded = await ensureCatalog()
+        if (seeded.seeded) {
+          setResult({ success: true, text: `Catálogo por defecto cargado: ${seeded.services} servicios.` })
+          await fetchCatalog()
+        }
+      }
+    })()
+  }, [fetchCatalog])
+
+  const handleSeed = async (replace: boolean) => {
+    if (replace && !window.confirm('Esto sustituye tu catálogo actual por el catálogo por defecto. ¿Continuar?')) return
+    setBusy(true)
+    setResult(null)
+    const res = await seedDefaultCatalog({ replace })
+    setBusy(false)
+    if (res.success) {
+      setResult({
+        success: true,
+        text: res.skipped
+          ? 'Ya tenías catálogo, no se ha modificado nada.'
+          : `Catálogo por defecto cargado: ${res.services} servicios en ${res.phases} fases.`,
+      })
+      await fetchCatalog()
+    } else {
+      setResult({ success: false, text: res.error || 'No se pudo cargar el catálogo por defecto.' })
+    }
+  }
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!file) return
-    
-    setLoading(true)
+    setBusy(true)
     setResult(null)
-    
+
     const formData = new FormData()
     formData.append('file', file)
-    
+    formData.append('mode', importMode)
+
     const res = await processExcelUpload(formData)
-    setResult(res)
-    setLoading(false)
+    setBusy(false)
     if (res.success) {
       setFile(null)
-      fetchCatalog() // Refresh the list after successful upload
+      setResult({ success: true, text: res.message || 'Excel importado.' })
+      await fetchCatalog()
+    } else {
+      setResult({ success: false, text: res.error || 'No se pudo importar el Excel.' })
     }
   }
 
-  // Group services by phase
-  const groupedServices = services.reduce((acc, service) => {
+  const handleUpdate = async (id: string, updates: { name?: string; unit?: string; base_price?: number }) => {
+    setServices((prev) => prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
+    const res = await updateCatalogService(id, updates)
+    if (!res.success) setResult({ success: false, text: res.error || 'No se pudo guardar el cambio.' })
+  }
+
+  const handleDelete = async (service: CatalogService) => {
+    if (!window.confirm(`¿Eliminar «${service.name}» del catálogo?`)) return
+    setServices((prev) => prev.filter((s) => s.id !== service.id))
+    const res = await deleteCatalogService(service.id)
+    if (!res.success) {
+      setResult({ success: false, text: res.error || 'No se pudo eliminar.' })
+      await fetchCatalog()
+    }
+  }
+
+  const handleAddService = async () => {
+    const phaseId = newService.phaseId || phases[0]?.id
+    if (!phaseId || !newService.name.trim()) {
+      setResult({ success: false, text: 'Indica la fase y el nombre del servicio.' })
+      return
+    }
+    setBusy(true)
+    const res = await addCatalogService(phaseId, {
+      name: newService.name,
+      unit: newService.unit,
+      base_price: Number(newService.price.replace(',', '.')) || 0,
+    })
+    setBusy(false)
+    if (res.success) {
+      setNewService({ phaseId, name: '', unit: 'ud', price: '' })
+      setShowAdd(false)
+      await fetchCatalog()
+    } else {
+      setResult({ success: false, text: res.error || 'No se pudo añadir el servicio.' })
+    }
+  }
+
+  const handleCreatePhase = async () => {
+    const name = window.prompt('Nombre de la nueva fase (ej. «Extras y varios»)')
+    if (!name) return
+    setBusy(true)
+    const res = await createCatalogPhase(name)
+    setBusy(false)
+    if (res.success && res.phase) setNewService((prev) => ({ ...prev, phaseId: res.phase!.id }))
+    await fetchCatalog()
+  }
+
+  const grouped = services.reduce((acc, service) => {
     const phaseName = service.phase_name || 'Sin categoría'
     if (!acc[phaseName]) acc[phaseName] = []
     acc[phaseName].push(service)
@@ -53,112 +149,255 @@ export default function CatalogUpload() {
   }, {} as Record<string, CatalogService[]>)
 
   return (
-    <div className="max-w-2xl mx-auto py-12 px-4">
-      <div className="mb-8">
-        <h1 className="text-3xl font-extrabold text-zinc-900 tracking-tight">Importar Catálogo</h1>
-        <p className="text-zinc-500 mt-2 font-medium">
-          Sube un archivo Excel (.xlsx) que contenga las fases y servicios de tu empresa.
-        </p>
+    <div className="max-w-3xl mx-auto py-12 px-4">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+        <div>
+          <h1 className="text-3xl font-extrabold text-zinc-900 tracking-tight flex items-center gap-3">
+            <Box size={28} className="text-blue-600" /> Mi Catálogo
+          </h1>
+          <p className="text-zinc-500 mt-2 font-medium">
+            {loading ? 'Cargando…' : `${services.length} servicios en ${Object.keys(grouped).length} fases`}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => handleSeed(services.length > 0)}
+            disabled={busy}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-300 text-white px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95"
+          >
+            <Sparkles size={16} /> {services.length > 0 ? 'Restaurar por defecto' : 'Cargar catálogo por defecto'}
+          </button>
+          <button
+            onClick={() => setShowAdd((v) => !v)}
+            disabled={busy}
+            className="flex items-center gap-2 bg-zinc-900 hover:bg-black disabled:bg-zinc-300 text-white px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95"
+          >
+            <Plus size={16} /> Añadir servicio
+          </button>
+          <button
+            onClick={handleCreatePhase}
+            disabled={busy}
+            className="flex items-center gap-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95"
+          >
+            <Plus size={16} /> Fase
+          </button>
+        </div>
       </div>
 
-      <div className="bg-white p-8 rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100">
-        <form onSubmit={handleUpload}>
-          <label className="border-2 border-dashed border-blue-200 bg-blue-50/50 hover:bg-blue-50 rounded-xl p-10 flex flex-col items-center justify-center cursor-pointer transition w-full group">
-            <div className="bg-white p-4 rounded-full shadow-sm mb-4 text-blue-600 group-hover:scale-110 transition-transform">
-              <UploadCloud size={32} />
-            </div>
-            <span className="font-bold text-blue-900 text-lg">Haz clic para buscar o arrastra el archivo</span>
-            <span className="text-sm font-medium text-blue-600/70 mt-1">Formato .xlsx esperado</span>
-            
-            <input 
-              type="file" 
+      {result && (
+        <div
+          className={`mb-6 p-4 rounded-lg flex items-start gap-3 border font-medium text-sm ${
+            result.success ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-100 text-red-700'
+          }`}
+        >
+          {result.success ? (
+            <CheckCircle2 size={18} className="shrink-0 mt-0.5" />
+          ) : (
+            <AlertCircle size={18} className="shrink-0 mt-0.5" />
+          )}
+          <span>{result.text}</span>
+        </div>
+      )}
+
+      {showAdd && (
+        <div className="mb-6 bg-white p-5 rounded-2xl border border-zinc-100 shadow-[0_4px_24px_rgba(0,0,0,0.02)] grid grid-cols-1 md:grid-cols-[1.3fr_1.3fr_0.6fr_0.7fr_auto] gap-3 items-end">
+          <div>
+            <label className="block text-xs font-bold text-zinc-500 mb-1">Fase</label>
+            <select
+              value={newService.phaseId}
+              onChange={(e) => setNewService({ ...newService, phaseId: e.target.value })}
+              className="w-full px-3 py-2.5 rounded-lg border border-zinc-200 bg-zinc-50 font-medium text-sm"
+            >
+              {phases.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-zinc-500 mb-1">Servicio</label>
+            <input
+              value={newService.name}
+              onChange={(e) => setNewService({ ...newService, name: e.target.value })}
+              placeholder="Ej. Cambio de bañera por plato de ducha"
+              className="w-full px-3 py-2.5 rounded-lg border border-zinc-200 bg-zinc-50 font-medium text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-zinc-500 mb-1">Unidad</label>
+            <select
+              value={newService.unit}
+              onChange={(e) => setNewService({ ...newService, unit: e.target.value })}
+              className="w-full px-3 py-2.5 rounded-lg border border-zinc-200 bg-zinc-50 font-medium text-sm"
+            >
+              {UNITS.map((u) => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-zinc-500 mb-1">Precio €</label>
+            <input
+              value={newService.price}
+              onChange={(e) => setNewService({ ...newService, price: e.target.value })}
+              inputMode="decimal"
+              placeholder="0,00"
+              className="w-full px-3 py-2.5 rounded-lg border border-zinc-200 bg-zinc-50 font-medium text-sm tabular-nums"
+            />
+          </div>
+          <button
+            onClick={handleAddService}
+            disabled={busy}
+            className="h-[42px] bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-300 text-white px-5 rounded-lg font-bold text-sm transition active:scale-95"
+          >
+            Añadir
+          </button>
+        </div>
+      )}
+
+      <div className="bg-white p-6 rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 mb-8">
+        <h3 className="font-bold text-zinc-800 mb-3 text-sm uppercase tracking-wider">Importar desde Excel</h3>
+        <div className="space-y-3">
+          <label className="border-2 border-dashed border-blue-200 bg-blue-50/50 hover:bg-blue-50 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition w-full">
+            <UploadCloud size={24} className="text-blue-600 mb-2" />
+            <span className="font-bold text-blue-900 text-sm">
+              {file ? file.name : 'Haz clic o arrastra tu archivo .xlsx'}
+            </span>
+            <input
+              type="file"
               accept=".xlsx,.xls"
-              className="hidden" 
+              className="hidden"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
           </label>
-
-          {file && (
-            <div className="mt-6 bg-zinc-50 border border-zinc-200 rounded-lg p-4 flex justify-between items-center">
-              <span className="font-medium text-zinc-800 break-all">{file.name}</span>
-              <span className="text-xs font-bold text-zinc-400">{(file.size / 1024).toFixed(1)} KB</span>
-            </div>
-          )}
-
-          {result && (
-            <div className={`mt-6 p-4 rounded-lg flex items-start gap-3 border font-medium ${result.success ? 'bg-green-50 text-green-800 border-green-200' : 'bg-red-50 text-red-800 border-red-200'}`}>
-              {result.success ? <CheckCircle2 className="shrink-0 mt-0.5" size={20} /> : <AlertCircle className="shrink-0 mt-0.5" size={20} />}
-              <span>{result.success ? result.message : result.error}</span>
-            </div>
-          )}
-
-          <button 
-            type="submit" 
-            disabled={!file || loading}
-            className="w-full mt-8 bg-zinc-900 disabled:bg-zinc-300 disabled:cursor-not-allowed hover:bg-black text-white px-6 py-4 rounded-xl font-bold transition shadow-sm text-lg active:scale-[0.98]"
-          >
-            {loading ? 'Procesando...' : 'Importar Datos'}
-          </button>
-        </form>
-
-        <div className="mt-8 border-t border-zinc-100 pt-8">
-          <h3 className="font-bold text-zinc-800 mb-4 text-sm uppercase tracking-wider">Formato de Excel Esperado</h3>
-          <div className="bg-zinc-50 p-4 rounded-lg font-mono text-xs text-zinc-600 overflow-x-auto border border-zinc-200 whitespace-pre">
-{`         | Fase 1: Demoliciones         |      |  |  |  | Precio
-Ud.      | PROTECCION DE ZONAS COMUNES  |      |  |  |  | 1
-M2.      | DEMOLICION TABIQUE LADRILLO  |      |  |  |  | 86.4
-         | Fase 2: Albañilería          |      |  |  |  |
-M2.      | SOLERA HASTA 5CM             |      |  |  |  | 18.82`}
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <label className="flex items-center gap-2 font-medium text-zinc-700">
+              <input type="radio" checked={importMode === 'replace'} onChange={() => setImportMode('replace')} />
+              Reemplazar todo mi catálogo
+            </label>
+            <label className="flex items-center gap-2 font-medium text-zinc-700">
+              <input type="radio" checked={importMode === 'merge'} onChange={() => setImportMode('merge')} />
+              Añadir a lo que ya tengo
+            </label>
           </div>
-          <p className="text-xs text-zinc-500 font-medium mt-3">
-            El sistema detecta filas con la palabra &quot;Fase&quot; como secciones. Las demás filas se leen como: Col A = Unidad, Col B = Nombre del Servicio, Col G = Precio.
+          <button
+            onClick={handleUpload}
+            disabled={!file || busy}
+            className="w-full bg-zinc-900 disabled:bg-zinc-300 hover:bg-black text-white px-6 py-3 rounded-xl font-bold transition active:scale-[0.99]"
+          >
+            {busy ? 'Procesando…' : 'Importar Excel'}
+          </button>
+          <p className="text-[11px] text-zinc-400 leading-snug">
+            Formato: filas con la palabra «Fase» como secciones. En el resto, Col A = unidad, Col B = nombre del
+            servicio, Col G = precio.
           </p>
         </div>
       </div>
 
-      <div className="mt-12 mb-8 flex items-center justify-between">
-        <h2 className="text-2xl font-extrabold text-zinc-900 tracking-tight flex items-center gap-2">
-          <Box size={24} className="text-blue-600" /> Mi Catálogo Actual
-        </h2>
-        <button 
+      <div className="mb-6 flex items-center justify-between">
+        <h2 className="text-lg font-black text-zinc-400 uppercase tracking-wider">Partidas</h2>
+        <button
           onClick={fetchCatalog}
           className="p-2 text-zinc-400 hover:text-zinc-900 transition hover:bg-zinc-100 rounded-full"
           title="Actualizar catálogo"
         >
-          <RefreshCw size={20} className={loadingCatalog ? "animate-spin" : ""} />
+          <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 overflow-hidden">
-        {loadingCatalog ? (
-          <div className="p-8 text-center text-zinc-500 font-medium animate-pulse">Cargando catálogo...</div>
-        ) : services.length === 0 ? (
-          <div className="p-12 text-center text-zinc-500 font-medium">No hay servicios en el catálogo. Sube un archivo Excel para empezar.</div>
-        ) : (
-          <div className="divide-y divide-zinc-100">
-            {Object.entries(groupedServices).map(([phaseName, phaseServices]) => (
-              <div key={phaseName}>
-                <div className="bg-zinc-50 px-6 py-3 border-b border-zinc-100 sticky top-0">
-                  <h3 className="font-bold text-zinc-800 uppercase tracking-wider text-xs">{phaseName}</h3>
-                </div>
-                <div className="divide-y divide-zinc-50">
-                  {phaseServices.map(service => (
-                    <div key={service.id} className="px-6 py-3 flex items-center justify-between hover:bg-zinc-50 transition group">
-                      <div>
-                        <div className="font-medium text-zinc-900 text-sm">{service.name}</div>
-                        <div className="text-xs font-bold text-zinc-400 uppercase mt-0.5">{service.unit}</div>
-                      </div>
-                      <div className="font-bold text-zinc-900 tabular-nums">
-                        {service.base_price.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+      {loading ? (
+        <div className="p-8 text-center text-zinc-500 font-medium animate-pulse">Cargando catálogo…</div>
+      ) : services.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-zinc-100 p-12 text-center">
+          <p className="text-zinc-500 font-medium">Tu catálogo está vacío.</p>
+          <p className="text-zinc-400 text-sm mt-1">
+            Pulsa «Cargar catálogo por defecto» o sube tu propio Excel.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {Object.entries(grouped).map(([phaseName, list]) => (
+            <div
+              key={phaseName}
+              className="bg-white rounded-2xl border border-zinc-100 overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.02)]"
+            >
+              <div className="bg-zinc-50 px-5 py-3 border-b border-zinc-100 flex items-center justify-between">
+                <h3 className="font-bold text-zinc-800 uppercase tracking-wider text-xs">{phaseName}</h3>
+                <span className="text-[11px] font-bold text-zinc-400">{list.length} partidas</span>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+              <div className="divide-y divide-zinc-50">
+                {list.map((service) => (
+                  <div key={service.id} className="px-5 py-3 hover:bg-zinc-50/60 transition">
+                    <div className="flex items-start gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          {service.code && (
+                            <span className="text-[10px] font-black text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded">
+                              {service.code}
+                            </span>
+                          )}
+                          <input
+                            defaultValue={service.name}
+                            onBlur={(e) =>
+                              e.target.value !== service.name && handleUpdate(service.id, { name: e.target.value })
+                            }
+                            className="flex-1 min-w-0 font-medium text-zinc-900 text-sm bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 transition"
+                          />
+                          <input
+                            defaultValue={service.unit}
+                            onBlur={(e) =>
+                              e.target.value !== service.unit && handleUpdate(service.id, { unit: e.target.value })
+                            }
+                            className="w-16 text-xs font-bold text-zinc-500 uppercase bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 rounded px-1.5 py-1 text-center transition"
+                          />
+                          <input
+                            defaultValue={service.base_price}
+                            inputMode="decimal"
+                            onBlur={(e) => {
+                              const value = Number(e.target.value.replace(',', '.'))
+                              if (!Number.isNaN(value) && value !== service.base_price) {
+                                handleUpdate(service.id, { base_price: value })
+                              }
+                            }}
+                            className="w-24 text-right font-bold text-zinc-900 tabular-nums text-sm bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 transition"
+                          />
+                          <button
+                            onClick={() => handleDelete(service)}
+                            className="p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
+                            title="Eliminar del catálogo"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                        {service.description && (
+                          <p className="text-[11px] text-zinc-400 mt-1 pl-1.5 leading-snug">{service.description}</p>
+                        )}
+                      </div>
+                      {service.price_min != null && service.price_max != null && (
+                        <div className="hidden md:block text-right shrink-0 pt-1">
+                          <div className="text-[10px] font-bold uppercase text-zinc-400">Mercado</div>
+                          <div className="text-[11px] font-bold text-zinc-500 tabular-nums">
+                            {eur(service.price_min)} – {eur(service.price_max)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-[11px] text-zinc-400 mt-8 leading-relaxed">
+        Los precios del catálogo por defecto son orientativos (banda de mercado España 2026). Revísalos y ajústalos a
+        tus tarifas: el precio guardado aquí es el que se usará en tus próximos presupuestos. También puedes cambiar el
+        precio de una línea concreta dentro de un presupuesto sin afectar al catálogo.
+      </p>
     </div>
   )
 }

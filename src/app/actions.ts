@@ -1,7 +1,10 @@
 'use server'
 
 import { Estimate, EstimateRow, CatalogService, CatalogPhase, CompanyProfile } from '@/types';
+import { DEFAULT_CATALOG } from '@/lib/default-catalog';
+import { catalogErrorMessage } from '@/lib/catalog-errors';
 import { createClient } from '@/lib/supabase/server';
+import { revalidatePath } from 'next/cache';
 
 export async function getEstimates() {
   const supabase = createClient();
@@ -199,6 +202,11 @@ export async function searchCatalog(): Promise<CatalogService[]> {
       base_price: s.base_price as number,
       phase_id: s.phase_id as string,
       phase_name: phaseInfo?.name || 'Sin categoría',
+      code: (s.code as string) ?? null,
+      description: (s.description as string) ?? null,
+      price_min: (s.price_min as number) ?? null,
+      price_max: (s.price_max as number) ?? null,
+      origin: (s.origin as string) ?? null,
       _phaseOrder: phaseInfo?.order ?? 999,
     };
   });
@@ -240,9 +248,107 @@ export async function addPhaseAndServices(phases: Omit<CatalogPhase, 'id'>[], ph
     if (services.length > 0) {
       const servicesToInsert = services.map((s: Omit<CatalogService, 'id' | 'phase_id'>) => ({
         ...s,
-        phase_id: phaseData.id
+        phase_id: phaseData.id,
+        origin: 'excel'
       }));
       await supabase.from('catalog_services').insert(servicesToInsert);
     }
   }
+}
+
+/**
+ * Carga el catálogo por defecto (42 partidas en 9 fases) en el catálogo de la
+ * empresa del usuario. Idempotente: si la empresa ya tiene fases no hace nada,
+ * salvo que se pida `replace: true`, en cuyo caso lo sustituye por completo.
+ */
+export async function seedDefaultCatalog(options?: { replace?: boolean }): Promise<{
+  success: boolean;
+  phases: number;
+  services: number;
+  skipped?: boolean;
+  error?: string;
+}> {
+  const supabase = createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, phases: 0, services: 0, error: 'No autenticado.' };
+
+  const { data: userRecord } = await supabase
+    .from('users')
+    .select('company_id')
+    .eq('id', user.id)
+    .single();
+
+  const companyId = userRecord?.company_id as string | undefined;
+  if (!companyId) {
+    return { success: false, phases: 0, services: 0, error: 'No se encontró la empresa del usuario.' };
+  }
+
+  const { count } = await supabase
+    .from('catalog_phases')
+    .select('*', { count: 'exact', head: true })
+    .eq('company_id', companyId);
+
+  if ((count ?? 0) > 0 && !options?.replace) {
+    return { success: true, phases: 0, services: 0, skipped: true };
+  }
+
+  if (options?.replace) {
+    // Borra SOLO el catálogo de esta empresa: nunca fiarse únicamente de RLS.
+    const { data: phases } = await supabase.from('catalog_phases').select('id').eq('company_id', companyId);
+    const phaseIds = (phases || []).map((p: { id: string }) => p.id);
+    if (phaseIds.length > 0) {
+      await supabase.from('catalog_services').delete().in('phase_id', phaseIds);
+    }
+    await supabase.from('catalog_phases').delete().eq('company_id', companyId);
+  }
+
+  let serviceCount = 0;
+
+  for (let i = 0; i < DEFAULT_CATALOG.length; i++) {
+    const phase = DEFAULT_CATALOG[i];
+
+    const { data: phaseData, error: phaseError } = await supabase
+      .from('catalog_phases')
+      .insert({ name: phase.name, company_id: companyId, order_index: i })
+      .select('id')
+      .single();
+
+    if (phaseError || !phaseData) {
+      return { success: false, phases: i, services: serviceCount, error: catalogErrorMessage(phaseError?.message) };
+    }
+
+    const rows = phase.services.map((service) => ({
+      phase_id: phaseData.id as string,
+      name: service.name,
+      unit: service.unit,
+      base_price: service.base_price,
+      code: service.code,
+      description: service.description,
+      price_min: service.price_min,
+      price_max: service.price_max,
+      origin: 'catalogo_base',
+    }));
+
+    const { error: serviceError } = await supabase.from('catalog_services').insert(rows);
+    if (serviceError) {
+      return { success: false, phases: i, services: serviceCount, error: catalogErrorMessage(serviceError.message) };
+    }
+
+    serviceCount += rows.length;
+  }
+
+  revalidatePath('/catalog');
+  revalidatePath('/estimates');
+
+  return { success: true, phases: DEFAULT_CATALOG.length, services: serviceCount };
+}
+
+/**
+ * Para las páginas que necesitan catálogo: si la empresa no tiene ninguna fase,
+ * carga el catálogo por defecto. Si ya tiene catálogo, no hace nada.
+ */
+export async function ensureCatalog(): Promise<{ seeded: boolean; services: number }> {
+  const result = await seedDefaultCatalog();
+  return { seeded: !result.skipped && result.success, services: result.services };
 }

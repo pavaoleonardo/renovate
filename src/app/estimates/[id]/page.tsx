@@ -1,10 +1,18 @@
-import { getEstimateDetails, searchCatalog, getCompanyProfile } from '@/app/actions';
+import { getEstimateDetails, searchCatalog, getCompanyProfile, ensureCatalog } from '@/app/actions';
 import EstimateEditor from '@/components/EstimateEditor';
 import Link from 'next/link';
 
 export default async function EstimateDocumentPage({ params }: { params: { id: string } }) {
   const { estimate, rows = [] } = await getEstimateDetails(params.id);
-  const catalog = await searchCatalog() || [];
+
+  let catalog = (await searchCatalog()) || [];
+  if (catalog.length === 0) {
+    // First time this company opens a budget with an empty catalog: load the
+    // default one (42 partidas) so nobody has to start from scratch.
+    await ensureCatalog();
+    catalog = (await searchCatalog()) || [];
+  }
+
   const company = await getCompanyProfile();
 
   if (!estimate) {
