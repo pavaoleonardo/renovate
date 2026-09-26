@@ -34,7 +34,7 @@ export default function LoginPage({
         <PasswordInput name="password" required />
 
 
-        <div className="flex justify-end -mt-4 mb-4">
+        <div className="flex justify-end mt-1 mb-4">
           <Link href="/login/forgot-password" className="text-sm text-blue-600 hover:text-blue-700 font-semibold transition">
             ¿Olvidaste tu contraseña?
           </Link>
