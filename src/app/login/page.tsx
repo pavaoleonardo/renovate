@@ -28,20 +28,23 @@ export default function LoginPage({
           required
         />
 
-        {/* Label + recovery link share one row: nothing can overlap the input. */}
-        <div className="flex items-baseline justify-between gap-2">
-          <label className="text-md font-bold" htmlFor="password">
-            Contraseña
-          </label>
+        <label className="text-md font-bold" htmlFor="password">
+          Contraseña
+        </label>
+
+        <PasswordInput name="password" required />
+
+        {/* Recovery link sits just under the input, aligned with its left edge.
+            Only positive spacing here — a negative margin is what caused the
+            2026-09-26 overlap incident (see SPEC.md §5 / §7). */}
+        <div className="mb-4">
           <Link
             href="/login/forgot-password"
-            className="text-sm text-blue-600 hover:text-blue-700 font-semibold transition whitespace-nowrap"
+            className="text-sm text-blue-600 hover:text-blue-700 font-semibold transition"
           >
             ¿Olvidaste tu contraseña?
           </Link>
         </div>
-
-        <PasswordInput name="password" required className="mb-4" />
 
         <button
           formAction={login}
