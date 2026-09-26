@@ -27,6 +27,7 @@ export default function CatalogPage() {
   const [importMode, setImportMode] = useState<'replace' | 'merge'>('replace')
   const [result, setResult] = useState<{ success: boolean; text: string } | null>(null)
   const [showAdd, setShowAdd] = useState(false)
+  const [seedStep, setSeedStep] = useState<null | 'choose' | 'confirm-replace'>(null)
   const [newService, setNewService] = useState({ phaseId: '', name: '', unit: 'ud', price: '' })
 
   const fetchCatalog = useCallback(async () => {
@@ -53,23 +54,29 @@ export default function CatalogPage() {
     })()
   }, [fetchCatalog])
 
-  const handleSeed = async (replace: boolean) => {
-    if (replace && !window.confirm('Esto sustituye tu catálogo actual por el catálogo por defecto. ¿Continuar?')) return
+  const runSeed = async (mode: 'merge' | 'replace') => {
     setBusy(true)
     setResult(null)
-    const res = await seedDefaultCatalog({ replace })
+    const res = await seedDefaultCatalog({ mode })
     setBusy(false)
-    if (res.success) {
-      setResult({
-        success: true,
-        text: res.skipped
-          ? 'Ya tenías catálogo, no se ha modificado nada.'
-          : `Catálogo por defecto cargado: ${res.services} servicios en ${res.phases} fases.`,
-      })
-      await fetchCatalog()
-    } else {
+    setSeedStep(null)
+
+    if (!res.success) {
       setResult({ success: false, text: res.error || 'No se pudo cargar el catálogo por defecto.' })
+      return
     }
+
+    if (mode === 'replace') {
+      setResult({ success: true, text: `Catálogo reemplazado: ${res.servicesCreated} partidas del catálogo por defecto.` })
+    } else if (res.servicesCreated > 0 || res.phasesCreated > 0) {
+      const parts = [`${res.servicesCreated} partidas añadidas`, `${res.phasesCreated} fases nuevas`]
+      if (res.servicesSkipped > 0) parts.push(`${res.servicesSkipped} ya existían`)
+      setResult({ success: true, text: `Catálogo por defecto añadido: ${parts.join(', ')}.` })
+    } else {
+      setResult({ success: true, text: 'Tu catálogo ya tenía todas las partidas del catálogo por defecto.' })
+    }
+
+    await fetchCatalog()
   }
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -161,11 +168,11 @@ export default function CatalogPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => handleSeed(services.length > 0)}
+            onClick={() => setSeedStep('choose')}
             disabled={busy}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-300 text-white px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95"
           >
-            <Sparkles size={16} /> {services.length > 0 ? 'Restaurar por defecto' : 'Cargar catálogo por defecto'}
+            <Sparkles size={16} /> Cargar catálogo por defecto
           </button>
           <button
             onClick={() => setShowAdd((v) => !v)}
@@ -196,6 +203,92 @@ export default function CatalogPage() {
             <AlertCircle size={18} className="shrink-0 mt-0.5" />
           )}
           <span>{result.text}</span>
+        </div>
+      )}
+
+      {seedStep && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-zinc-100 w-full max-w-lg p-6">
+            <div className="flex items-start gap-3">
+              <div className="bg-blue-50 text-blue-600 rounded-full p-2 shrink-0">
+                <Sparkles size={20} />
+              </div>
+              <div>
+                <h3 className="text-lg font-extrabold text-zinc-900">Catálogo por defecto</h3>
+                <p className="text-sm text-zinc-500 font-medium mt-1">
+                  42 partidas en 9 fases con precios orientativos y su banda de mercado. ¿Cómo quieres cargarlo?
+                </p>
+              </div>
+            </div>
+
+            {seedStep === 'choose' ? (
+              <div className="mt-5 space-y-3">
+                <button
+                  onClick={() => runSeed('merge')}
+                  disabled={busy}
+                  className="w-full text-left p-4 rounded-xl border-2 border-blue-200 bg-blue-50/50 hover:bg-blue-50 disabled:opacity-60 transition active:scale-[0.99]"
+                >
+                  <div className="font-bold text-blue-900 flex items-center gap-2">
+                    Añadir a lo que ya tengo
+                    <span className="text-[10px] font-black uppercase bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                      Recomendado
+                    </span>
+                  </div>
+                  <p className="text-xs text-blue-900/70 mt-1">
+                    Añade sólo las partidas que te falten (tienes {services.length}). No borra nada.
+                  </p>
+                </button>
+
+                <button
+                  onClick={() => setSeedStep('confirm-replace')}
+                  disabled={busy}
+                  className="w-full text-left p-4 rounded-xl border-2 border-zinc-200 hover:border-red-200 hover:bg-red-50/40 disabled:opacity-60 transition active:scale-[0.99]"
+                >
+                  <div className="font-bold text-zinc-900">Reemplazar todo mi catálogo</div>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    Borra tus {services.length} partidas actuales y deja sólo las 42 del catálogo por defecto.
+                  </p>
+                </button>
+              </div>
+            ) : (
+              <div className="mt-5">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900">
+                  <p className="font-bold flex items-center gap-2">
+                    <AlertCircle size={16} /> ¿Seguro que quieres reemplazar?
+                  </p>
+                  <p className="mt-1 leading-snug">
+                    Se eliminarán <strong>{services.length} partidas</strong> de tu catálogo —incluidas las que hayas
+                    importado de Excel— y se sustituirán por las 42 del catálogo por defecto.{' '}
+                    <strong>No se puede deshacer.</strong>
+                  </p>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={() => runSeed('replace')}
+                    disabled={busy}
+                    className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-zinc-300 text-white px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95"
+                  >
+                    Sí, reemplazar
+                  </button>
+                  <button
+                    onClick={() => setSeedStep('choose')}
+                    disabled={busy}
+                    className="flex-1 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95"
+                  >
+                    Volver
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => setSeedStep(null)}
+              disabled={busy}
+              className="w-full mt-4 text-zinc-400 hover:text-zinc-600 font-medium text-sm transition"
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
       )}
 
