@@ -2,6 +2,20 @@ import Link from 'next/link';
 import { getEstimates, createEstimate, getCompanyProfile } from '@/app/actions';
 import { redirect } from 'next/navigation';
 import { Estimate } from '@/types';
+import { computeTotals } from '@/lib/estimate-totals';
+
+const fmt = (n: number) => n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
+
+/**
+ * What each row must show: the total the client sees (base + VAT) and how it was
+ * built. `subtotal_amount` is the base imponible; for budgets saved before the
+ * tax migration it is missing, and back then total_amount held exactly that base,
+ * so falling back to it keeps those rows right as well.
+ */
+function estimateTotals(e: Estimate) {
+  const base = Number(e.subtotal_amount ?? e.total_amount) || 0;
+  return computeTotals(base, e.tax_rate);
+}
 
 function getStatusLabel(estimate: Estimate) {
   // Auto-expire: if status is draft or sent and older than 30 days
@@ -111,11 +125,12 @@ export default async function EstimatesList() {
             <div className="divide-y divide-zinc-50">
               {grouped[year].map(e => {
                 const st = getStatusLabel(e);
+                const totals = estimateTotals(e);
                 return (
                   <Link 
                     key={e.id} 
                     href={`/estimates/${e.id}`} 
-                    className="grid grid-cols-1 md:grid-cols-[80px_1.2fr_1.5fr_100px_110px_80px] gap-3 p-4 items-center hover:bg-blue-50/50 transition group"
+                    className="grid grid-cols-1 md:grid-cols-[80px_1.2fr_1.5fr_100px_150px_80px] gap-3 p-4 items-center hover:bg-blue-50/50 transition group"
                   >
                     <div className="text-xs font-bold text-zinc-400 hidden md:block">
                       {formatDate(e.created_at)}
@@ -131,8 +146,11 @@ export default async function EstimatesList() {
                         {st.label}
                       </span>
                     </div>
-                    <div className="text-right tabular-nums font-extrabold text-zinc-900">
-                      {(e.total_amount || 0).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+                    <div className="text-right">
+                      <div className="tabular-nums font-extrabold text-zinc-900">{fmt(totals.total)}</div>
+                      <div className="text-[10px] font-bold text-zinc-400 tabular-nums">
+                        {totals.taxRate > 0 ? `Base ${fmt(totals.subtotal)} · IVA ${totals.taxRate}%` : 'Sin IVA'}
+                      </div>
                     </div>
                     <div className="text-blue-600 text-right font-bold text-sm opacity-0 group-hover:opacity-100 transition hidden md:block">
                       Abrir &rarr;

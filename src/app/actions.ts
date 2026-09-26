@@ -3,6 +3,7 @@
 import { Estimate, EstimateRow, CatalogService, CatalogPhase, CompanyProfile } from '@/types';
 import { DEFAULT_CATALOG } from '@/lib/default-catalog';
 import { catalogErrorMessage } from '@/lib/catalog-errors';
+import { computeTotals, normalizeTaxRate } from '@/lib/estimate-totals';
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 
@@ -63,6 +64,8 @@ export async function createEstimate(client_name: string, property_address: stri
       property_address: property_address || 'Pendiente',
       status: 'draft',
       total_amount: 0,
+      // subtotal_amount (0) and tax_rate (21) come from the column defaults, so
+      // creating a budget keeps working even before the tax migration is applied.
       warranty_months: 12
     })
     .select()
@@ -127,12 +130,23 @@ export async function saveEstimateRows(estimateId: string, rows: EstimateRow[]) 
     };
   });
   
-  const totalAmount = processedRows.reduce((acc, r) => acc + (r.total || 0), 0);
+  const subtotalAmount = processedRows.reduce((acc, r) => acc + (r.total || 0), 0);
 
-  // 1. Update total amount
+  // The VAT lives on the estimate now (0 %, 10 % or 21 %), not on the row data,
+  // so read it here: both totals are stored with the same meaning the editor and
+  // the PDF display.
+  const { data: current } = await supabase
+    .from('estimates')
+    .select('tax_rate')
+    .eq('id', estimateId)
+    .single();
+
+  const totals = computeTotals(subtotalAmount, current?.tax_rate);
+
+  // 1. Update both stored totals (base imponible + total with VAT)
   await supabase
     .from('estimates')
-    .update({ total_amount: totalAmount })
+    .update({ subtotal_amount: totals.subtotal, total_amount: totals.total })
     .eq('id', estimateId);
 
   // 2. Wipe existing rows
@@ -152,10 +166,10 @@ export async function saveEstimateRows(estimateId: string, rows: EstimateRow[]) 
 
   if (error) {
     console.error('Error saving rows', error);
-    return { success: false, totalAmount: 0 };
+    return { success: false, subtotal: 0, totalWithTax: 0 };
   }
 
-  return { success: true, totalAmount };
+  return { success: true, subtotal: totals.subtotal, totalWithTax: totals.total };
 }
 
 export async function updateEstimateStatus(estimateId: string, status: Estimate['status']) {
@@ -170,6 +184,47 @@ export async function updateEstimateStatus(estimateId: string, status: Estimate[
 
   if (error) throw new Error(error.message);
   
+  return { success: true, estimate: data as Estimate };
+}
+
+/**
+ * Changes the VAT applied to a budget (0 %, 10 % or 21 %) and recomputes the
+ * stored totals from the rows already in the database, so the dashboard can
+ * never drift from the document even if the user leaves without saving.
+ */
+export async function updateEstimateTaxRate(estimateId: string, taxRate: number) {
+  const supabase = createClient();
+  const rate = normalizeTaxRate(taxRate);
+
+  const { data: rows } = await supabase
+    .from('estimate_rows')
+    .select('type, price_snapshot, quantity')
+    .eq('estimate_id', estimateId);
+
+  const subtotalAmount = (rows || []).reduce((acc, row) => {
+    const r = row as { type: string; price_snapshot: number | null; quantity: number | null };
+    if (r.type !== 'item') return acc;
+    return acc + (Number(r.price_snapshot) || 0) * (Number(r.quantity) || 0);
+  }, 0);
+
+  const totals = computeTotals(subtotalAmount, rate);
+
+  const { data, error } = await supabase
+    .from('estimates')
+    .update({
+      tax_rate: totals.taxRate,
+      subtotal_amount: totals.subtotal,
+      total_amount: totals.total,
+    })
+    .eq('id', estimateId)
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath('/estimates');
+  revalidatePath(`/estimates/${estimateId}`);
+
   return { success: true, estimate: data as Estimate };
 }
 

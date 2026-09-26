@@ -6,6 +6,11 @@ export interface Estimate {
   client_name: string;
   property_address: string;
   status: EstimateStatus;
+  /** Sum of the rows, VAT excluded (base imponible). */
+  subtotal_amount: number;
+  /** Applied VAT percentage: 0 (sin IVA), 10 (vivienda > 2 años) or 21 (general). */
+  tax_rate: number;
+  /** subtotal_amount + VAT. The figure shown on /estimates and as TOTAL in the PDF. */
   total_amount: number;
   warranty_months: number;
   warranty_end_date: string | null;
