@@ -11,6 +11,11 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 export const metadata: Metadata = {
   title: 'Renovate MVP - Presupuestos de Construcción',
   description: 'SaaS vertical rápido para presupuestos de reformas.',
+  // Build fingerprint: lets you confirm which deployment a browser is showing.
+  // View Source → search "build-commit".
+  other: {
+    'build-commit': process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local',
+  },
 };
 
 export default async function RootLayout({
