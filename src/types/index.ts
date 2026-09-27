@@ -69,3 +69,36 @@ export interface CompanyProfile {
   cif: string | null;
   logo_url: string | null;
 }
+
+/**
+ * Result of analysing an uploaded Excel on /catalog, shown BEFORE anything is
+ * saved: which column was read as the price and what each line will become.
+ */
+export interface ExcelPreviewService {
+  name: string;
+  unit: string;
+  base_price: number;
+  hasPrice: boolean;
+}
+
+export interface ExcelPreviewPhase {
+  name: string;
+  services: ExcelPreviewService[];
+}
+
+export interface ExcelPreview {
+  phases: ExcelPreviewPhase[];
+  priceColumn: { letter: string; header: string; detectedByHeader: boolean };
+  /**
+   * Column the sections were read from, when the sheet has one. `null` means the
+   * sections were guessed from the title rows of the sheet.
+   */
+  sectionColumn: { letter: string; header: string } | null;
+  /** Column read as the description of each partida. */
+  nameColumn: { letter: string; header: string };
+  /** Column read as the unit of each partida. */
+  unitColumn: { letter: string; header: string };
+  headerRow: number | null;
+  totals: { phases: number; services: number; missingPrices: number; suspiciousPrices: number };
+  warnings: string[];
+}

@@ -6,12 +6,13 @@ import {
   createCatalogPhase,
   deleteCatalogService,
   listCatalogPhases,
+  previewExcelUpload,
   processExcelUpload,
   updateCatalogService,
 } from './actions'
 import { ensureCatalog, searchCatalog, seedDefaultCatalog } from '@/app/actions'
 import { AlertCircle, CheckCircle2, Box, Plus, RefreshCw, Sparkles, Trash2, UploadCloud } from 'lucide-react'
-import { CatalogService } from '@/types'
+import { CatalogService, ExcelPreview } from '@/types'
 
 const UNITS = ['m2', 'ml', 'm3', 'ud', 'kg', 'h', 'vg']
 
@@ -27,6 +28,8 @@ export default function CatalogPage() {
   const [importMode, setImportMode] = useState<'replace' | 'merge'>('replace')
   const [result, setResult] = useState<{ success: boolean; text: string } | null>(null)
   const [showAdd, setShowAdd] = useState(false)
+  /** What the app understood from the selected Excel, before anything is saved. */
+  const [preview, setPreview] = useState<ExcelPreview | null>(null)
   const [seedStep, setSeedStep] = useState<null | 'choose' | 'confirm-replace'>(null)
   const [newService, setNewService] = useState({ phaseId: '', name: '', unit: 'ud', price: '' })
 
@@ -47,7 +50,7 @@ export default function CatalogPage() {
       if (existing.length === 0) {
         const seeded = await ensureCatalog()
         if (seeded.seeded) {
-          setResult({ success: true, text: `Catálogo por defecto cargado: ${seeded.services} servicios.` })
+          setResult({ success: true, text: `Catálogo por defecto cargado: ${seeded.services} partidas.` })
           await fetchCatalog()
         }
       }
@@ -69,7 +72,7 @@ export default function CatalogPage() {
     if (mode === 'replace') {
       setResult({ success: true, text: `Catálogo reemplazado: ${res.servicesCreated} partidas del catálogo por defecto.` })
     } else if (res.servicesCreated > 0 || res.phasesCreated > 0) {
-      const parts = [`${res.servicesCreated} partidas añadidas`, `${res.phasesCreated} fases nuevas`]
+      const parts = [`${res.servicesCreated} partidas añadidas`, `${res.phasesCreated} secciones nuevas`]
       if (res.servicesSkipped > 0) parts.push(`${res.servicesSkipped} ya existían`)
       setResult({ success: true, text: `Catálogo por defecto añadido: ${parts.join(', ')}.` })
     } else {
@@ -77,6 +80,29 @@ export default function CatalogPage() {
     }
 
     await fetchCatalog()
+  }
+
+  /**
+   * Selecting a file analyses it straight away: the catalog is only touched when
+   * the user confirms what the preview shows.
+   */
+  const handleFileChange = async (selected: File | null) => {
+    setFile(selected)
+    setPreview(null)
+    setResult(null)
+    if (!selected) return
+
+    setBusy(true)
+    const formData = new FormData()
+    formData.append('file', selected)
+    const res = await previewExcelUpload(formData)
+    setBusy(false)
+
+    if (res.success) {
+      setPreview(res.preview ?? null)
+    } else {
+      setResult({ success: false, text: res.error || 'No se pudo analizar el Excel.' })
+    }
   }
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -93,6 +119,7 @@ export default function CatalogPage() {
     setBusy(false)
     if (res.success) {
       setFile(null)
+      setPreview(null)
       setResult({ success: true, text: res.message || 'Excel importado.' })
       await fetchCatalog()
     } else {
@@ -119,7 +146,7 @@ export default function CatalogPage() {
   const handleAddService = async () => {
     const phaseId = newService.phaseId || phases[0]?.id
     if (!phaseId || !newService.name.trim()) {
-      setResult({ success: false, text: 'Indica la fase y el nombre del servicio.' })
+      setResult({ success: false, text: 'Indica la sección y el nombre de la partida.' })
       return
     }
     setBusy(true)
@@ -134,12 +161,12 @@ export default function CatalogPage() {
       setShowAdd(false)
       await fetchCatalog()
     } else {
-      setResult({ success: false, text: res.error || 'No se pudo añadir el servicio.' })
+      setResult({ success: false, text: res.error || 'No se pudo añadir la partida.' })
     }
   }
 
   const handleCreatePhase = async () => {
-    const name = window.prompt('Nombre de la nueva fase (ej. «Extras y varios»)')
+    const name = window.prompt('Nombre de la nueva sección (ej. «Extras y varios»)')
     if (!name) return
     setBusy(true)
     const res = await createCatalogPhase(name)
@@ -163,7 +190,7 @@ export default function CatalogPage() {
             <Box size={28} className="text-blue-600" /> Mi Catálogo
           </h1>
           <p className="text-zinc-500 mt-2 font-medium">
-            {loading ? 'Cargando…' : `${services.length} servicios en ${Object.keys(grouped).length} fases`}
+            {loading ? 'Cargando…' : `${services.length} partidas en ${Object.keys(grouped).length} secciones`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -179,14 +206,14 @@ export default function CatalogPage() {
             disabled={busy}
             className="flex items-center gap-2 bg-zinc-900 hover:bg-black disabled:bg-zinc-300 text-white px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95"
           >
-            <Plus size={16} /> Añadir servicio
+            <Plus size={16} /> Añadir partida
           </button>
           <button
             onClick={handleCreatePhase}
             disabled={busy}
             className="flex items-center gap-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95"
           >
-            <Plus size={16} /> Fase
+            <Plus size={16} /> Sección
           </button>
         </div>
       </div>
@@ -216,7 +243,7 @@ export default function CatalogPage() {
               <div>
                 <h3 className="text-lg font-extrabold text-zinc-900">Catálogo por defecto</h3>
                 <p className="text-sm text-zinc-500 font-medium mt-1">
-                  42 partidas en 9 fases con precios orientativos y su banda de mercado. ¿Cómo quieres cargarlo?
+                  42 partidas en 9 secciones con precios orientativos y su banda de mercado. ¿Cómo quieres cargarlo?
                 </p>
               </div>
             </div>
@@ -295,7 +322,7 @@ export default function CatalogPage() {
       {showAdd && (
         <div className="mb-6 bg-white p-5 rounded-2xl border border-zinc-100 shadow-[0_4px_24px_rgba(0,0,0,0.02)] grid grid-cols-1 md:grid-cols-[1.3fr_1.3fr_0.6fr_0.7fr_auto] gap-3 items-end">
           <div>
-            <label className="block text-xs font-bold text-zinc-500 mb-1">Fase</label>
+            <label className="block text-xs font-bold text-zinc-500 mb-1">Sección</label>
             <select
               value={newService.phaseId}
               onChange={(e) => setNewService({ ...newService, phaseId: e.target.value })}
@@ -309,7 +336,7 @@ export default function CatalogPage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-bold text-zinc-500 mb-1">Servicio</label>
+            <label className="block text-xs font-bold text-zinc-500 mb-1">Partida</label>
             <input
               value={newService.name}
               onChange={(e) => setNewService({ ...newService, name: e.target.value })}
@@ -363,7 +390,7 @@ export default function CatalogPage() {
               type="file"
               accept=".xlsx,.xls"
               className="hidden"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
             />
           </label>
           <div className="flex flex-wrap items-center gap-4 text-sm">
@@ -376,16 +403,99 @@ export default function CatalogPage() {
               Añadir a lo que ya tengo
             </label>
           </div>
+          {preview && (
+            <div className="rounded-xl border border-zinc-200 overflow-hidden">
+              <div className="p-3 bg-zinc-50 border-b border-zinc-100 space-y-1">
+                <p className="text-sm font-black text-zinc-900">
+                  Precio en tu catálogo → columna{' '}
+                  <span className="text-blue-700">{preview.priceColumn.letter}</span>
+                  {preview.priceColumn.header
+                    ? ` («${preview.priceColumn.header}»)`
+                    : ' (la columna con más números, sin cabecera)'}
+                </p>
+                <p className="text-xs font-bold text-zinc-500">
+                  {preview.headerRow ? `Cabecera en la fila ${preview.headerRow} · ` : ''}
+                  {preview.totals.services} partidas en {preview.totals.phases} secciones ·{' '}
+                  {preview.sectionColumn
+                    ? `secciones por la columna ${preview.sectionColumn.letter}` +
+                      (preview.sectionColumn.header ? ` («${preview.sectionColumn.header}»)` : '')
+                    : 'secciones por los títulos del Excel'}
+                </p>
+              </div>
+
+              {preview.warnings.length > 0 && (
+                <div className="p-3 bg-amber-50 border-b border-amber-100 space-y-1.5">
+                  {preview.warnings.map((warning) => (
+                    <p key={warning} className="text-xs text-amber-900 font-medium flex items-start gap-2">
+                      <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                      <span>{warning}</span>
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              <div className="max-h-64 overflow-auto">
+                <div className="px-3 py-1.5 grid grid-cols-[1fr_48px_92px] gap-2 text-[10px] font-black uppercase tracking-wide text-zinc-400 bg-white border-b border-zinc-100">
+                  <span>Descripción</span>
+                  <span className="text-center">Ud</span>
+                  <span className="text-right">Precio en tu catálogo</span>
+                </div>
+                {preview.phases.map((phase) => (
+                  <div key={phase.name}>
+                    <div className="px-3 py-1.5 bg-blue-50/50 text-[11px] font-black uppercase tracking-wide text-blue-900">
+                      {phase.name}
+                    </div>
+                    {phase.services.slice(0, 4).map((service, index) => (
+                      <div
+                        key={`${service.name}-${index}`}
+                        className="px-3 py-1.5 grid grid-cols-[1fr_48px_92px] gap-2 text-xs items-center border-t border-zinc-50"
+                      >
+                        <span className="text-zinc-700 font-medium truncate" title={service.name}>
+                          {service.name}
+                        </span>
+                        <span className="text-zinc-400 uppercase text-center">{service.unit}</span>
+                        <span
+                          className={`text-right tabular-nums font-bold ${
+                            service.hasPrice ? 'text-zinc-800' : 'text-red-500'
+                          }`}
+                        >
+                          {service.hasPrice ? eur(service.base_price) : 'sin precio'}
+                        </span>
+                      </div>
+                    ))}
+                    {phase.services.length > 4 && (
+                      <div className="px-3 py-1.5 text-[11px] text-zinc-400 font-medium border-t border-zinc-50">
+                        … y {phase.services.length - 4} partidas más en esta sección
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <p className="p-2.5 bg-zinc-50 border-t border-zinc-100 text-[11px] text-zinc-500 font-medium">
+                Lo que ves a la derecha es <strong>exactamente lo que se guardará como precio</strong> de cada partida:
+                columna {preview.priceColumn.letter}
+                {preview.priceColumn.header ? `, «${preview.priceColumn.header}»` : ' (la de más números)'}. La descripción sale
+                de la columna {preview.nameColumn.letter}
+                {preview.nameColumn.header ? ` («${preview.nameColumn.header}»)` : ''} y la unidad de la {preview.unitColumn.letter}
+                {preview.unitColumn.header ? ` («${preview.unitColumn.header}»)` : ''}. Si un inodoro aparece a 1,00 €, ese 1,00 €
+                es el precio que se guardará: probablemente el Excel ha traído mediciones en lugar de tarifas.
+              </p>
+            </div>
+          )}
+
           <button
             onClick={handleUpload}
-            disabled={!file || busy}
+            disabled={!file || !preview || busy}
             className="w-full bg-zinc-900 disabled:bg-zinc-300 hover:bg-black text-white px-6 py-3 rounded-xl font-bold transition active:scale-[0.99]"
           >
-            {busy ? 'Procesando…' : 'Importar Excel'}
+            {busy ? 'Procesando…' : preview ? 'Confirmar importación' : 'Importar Excel'}
           </button>
           <p className="text-[11px] text-zinc-400 leading-snug">
-            Formato: filas con la palabra «Fase» como secciones. En el resto, Col A = unidad, Col B = nombre del
-            servicio, Col G = precio.
+            Se admiten .xlsx y .xls. El precio se lee de la columna que anuncie el resumen («Precio», «PVP», «Importe»…); si
+            la hoja no tiene cabecera, de la que más números tenga. Las secciones se leen de una columna
+            «Fase / Capítulo / Sección / Grupo» cuando existe y, si no existe, de las filas de título sin unidad ni precio. Al
+            elegir el archivo verás qué se va a guardar antes de tocar el catálogo.
           </p>
         </div>
       </div>

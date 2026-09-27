@@ -7,6 +7,46 @@ import { Plus, GripVertical, Trash2, Printer, CheckCircle2, ChevronUp, ChevronDo
 import { computeTotals, normalizeTaxRate, taxHint, taxLabel, TAX_RATE_OPTIONS } from '@/lib/estimate-totals';
 import EstimatePDFPreview from './EstimatePDFPreview';
 
+/**
+ * "+ Añadir Sección..." control. Shared by the empty state (a brand-new budget,
+ * where it is the only action available) and by the quick-add bar at the bottom
+ * of an existing budget.
+ */
+function AddSectionControl({
+  catalogPhases,
+  onAdd,
+  size = 'sm'
+}: {
+  catalogPhases: string[];
+  onAdd: (name?: string) => void;
+  size?: 'sm' | 'lg';
+}) {
+  const className = size === 'lg'
+    ? 'text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-6 py-4 rounded-xl transition shadow-sm border-2 border-blue-200 cursor-pointer appearance-none text-center active:scale-[0.99]'
+    : 'text-sm font-bold text-zinc-700 bg-white hover:bg-zinc-50 px-4 py-2 rounded-lg transition shadow-sm border border-zinc-200 cursor-pointer appearance-none pr-8';
+
+  return (
+    <select
+      className={className}
+      value=""
+      onChange={(e) => {
+        if (e.target.value === '__custom__') {
+          onAdd();
+        } else {
+          onAdd(e.target.value);
+        }
+        e.target.value = '';
+      }}
+    >
+      <option value="" disabled>{size === 'lg' ? 'Elegir sección del catálogo…' : '+ Añadir Sección...'}</option>
+      {catalogPhases.map(phaseName => (
+        <option key={phaseName} value={phaseName}>{phaseName}</option>
+      ))}
+      <option value="__custom__">— Sección personalizada</option>
+    </select>
+  );
+}
+
 export default function EstimateEditor({ 
   initialEstimate, 
   initialRows, 
@@ -53,6 +93,16 @@ export default function EstimateEditor({
     return groups;
   }, [catalog]);
 
+  const catalogPhaseNames = useMemo(() => Object.keys(catalogByPhase), [catalogByPhase]);
+
+  /**
+   * A budget that has just been created has no rows: the first step is always
+   * to add a section. The line editor only makes sense once a section exists,
+   * because every line belongs to a section.
+   */
+  const isBlankBudget = rows.length === 0;
+  const hasSection = useMemo(() => rows.some(r => r.type === 'phase'), [rows]);
+
   const addPhase = (name?: string) => {
     setRows([...rows, {
       id: crypto.randomUUID(),
@@ -67,18 +117,32 @@ export default function EstimateEditor({
     }]);
   };
 
-  const addServiceRow = () => {
-    setRows([...rows, {
+  /**
+   * Adds an empty line. Without an argument it goes at the end of the budget;
+   * with `afterIndex` it is inserted just below that row, which is how a line
+   * ends up inside the section you clicked on.
+   */
+  const addServiceRow = (afterIndex?: number) => {
+    const newRow: EstimateRow = {
       id: crypto.randomUUID(),
       type: 'item',
-      position: rows.length,
+      position: 0, // recomputed on save from the array order
       phase_name_snapshot: null,
       service_name_snapshot: '',
       unit_snapshot: 'un',
       price_snapshot: 0,
       quantity: 1,
       total: 0
-    }]);
+    };
+
+    if (afterIndex === undefined) {
+      setRows([...rows, newRow]);
+      return;
+    }
+
+    const next = [...rows];
+    next.splice(afterIndex + 1, 0, newRow);
+    setRows(next);
   };
 
   const updateRow = (id: string, updates: Partial<EstimateRow>) => {
@@ -289,6 +353,40 @@ export default function EstimateEditor({
 
         {/* DOCUMENT ROWS */}
         <div className="bg-white rounded-xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 overflow-hidden">
+          {isBlankBudget ? (
+            <div className="p-10 md:p-14 text-center">
+              <div className="mx-auto w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4">
+                <Plus size={22} />
+              </div>
+              <h3 className="text-xl font-extrabold text-zinc-900 tracking-tight">Empieza por una sección</h3>
+              <p className="text-sm text-zinc-500 font-medium mt-2 max-w-md mx-auto leading-relaxed">
+                Elige una sección del catálogo o crea una personalizada. En cuanto exista la sección
+                aparecerán sus líneas para ir añadiendo los servicios.
+              </p>
+
+              <div className="mt-6 flex flex-col md:flex-row items-stretch md:items-center justify-center gap-3">
+                <AddSectionControl catalogPhases={catalogPhaseNames} onAdd={addPhase} size="lg" />
+                <button
+                  type="button"
+                  onClick={() => addPhase()}
+                  className="text-sm font-bold text-zinc-700 bg-white hover:bg-zinc-50 px-6 py-4 rounded-xl transition shadow-sm border-2 border-zinc-200 active:scale-[0.99]"
+                >
+                  + Sección personalizada
+                </button>
+              </div>
+
+              {catalogPhaseNames.length === 0 && (
+                <p className="text-xs text-zinc-400 font-medium mt-4">
+                  Tu catálogo todavía no tiene secciones.{' '}
+                  <a href="/catalog" className="text-blue-600 font-bold hover:underline">
+                    Carga servicios en el catálogo
+                  </a>{' '}
+                  para poder elegir la sección desde aquí.
+                </p>
+              )}
+            </div>
+          ) : (
+            <>
           <div className="grid grid-cols-[30px_1fr_120px_60px_100px_80px_100px_30px] gap-3 p-3 bg-zinc-50/80 border-b border-zinc-100 text-[10px] font-bold text-zinc-400 uppercase tracking-widest items-center">
             <div></div>
             <div>Descripción</div>
@@ -311,7 +409,7 @@ export default function EstimateEditor({
                     onDragOver={(e) => handleDragOver(rowIndex, e)}
                     onDrop={(e) => handleDrop(rowIndex, e)}
                     onDragEnd={handleDragEnd}
-                    className={`grid grid-cols-[30px_1fr_40px] gap-3 p-2 bg-blue-50/40 hover:bg-blue-50/80 items-center group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
+                    className={`grid grid-cols-[30px_1fr_auto] gap-3 p-2 bg-blue-50/40 hover:bg-blue-50/80 items-center group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
                   >
                     <div className="text-center cursor-grab active:cursor-grabbing text-zinc-300 hover:text-blue-500"><GripVertical size={18}/></div>
                     <input 
@@ -320,7 +418,17 @@ export default function EstimateEditor({
                       onChange={(e) => updateRow(row.id, { phase_name_snapshot: e.target.value })}
                       placeholder="Nombre de Sección"
                     />
-                    <button onClick={() => removeRow(row.id)} className="text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={16} /></button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => addServiceRow(rowIndex)}
+                        title="Añadir una línea a esta sección"
+                        className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-100 px-2 py-1 rounded-md transition md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
+                      >
+                        <Plus size={14} /> Línea
+                      </button>
+                      <button onClick={() => removeRow(row.id)} className="p-1 text-zinc-300 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100 transition"><Trash2 size={16} /></button>
+                    </div>
                   </div>
                 );
               }
@@ -435,28 +543,17 @@ export default function EstimateEditor({
 
           {/* Quick Add Buttons */}
           <div className="p-4 bg-zinc-50 border-t border-zinc-100 flex gap-3 items-center flex-wrap">
-            <button onClick={addServiceRow} className="flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border border-blue-100">
-              <Plus size={18} /> Añadir Línea
-            </button>
+            {hasSection ? (
+              <button onClick={() => addServiceRow()} className="flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border border-blue-100">
+                <Plus size={18} /> Añadir Línea
+              </button>
+            ) : (
+              <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg">
+                Añade una sección para empezar a añadir líneas de servicio.
+              </p>
+            )}
             <div className="flex items-center gap-1">
-              <select
-                className="text-sm font-bold text-zinc-700 bg-white hover:bg-zinc-50 px-4 py-2 rounded-lg transition shadow-sm border border-zinc-200 cursor-pointer appearance-none pr-8"
-                value=""
-                onChange={(e) => {
-                  if (e.target.value === '__custom__') {
-                    addPhase();
-                  } else {
-                    addPhase(e.target.value);
-                  }
-                  e.target.value = '';
-                }}
-              >
-                <option value="" disabled>+ Añadir Sección...</option>
-                {Object.keys(catalogByPhase).map(phaseName => (
-                  <option key={phaseName} value={phaseName}>{phaseName}</option>
-                ))}
-                <option value="__custom__">— Sección personalizada</option>
-              </select>
+              <AddSectionControl catalogPhases={catalogPhaseNames} onAdd={addPhase} />
             </div>
             {/* AI Translate button + error */}
             <div className="ml-auto flex flex-col items-end gap-1">
@@ -477,6 +574,8 @@ export default function EstimateEditor({
               )}
             </div>
           </div>
+            </>
+          )}
         </div>
 
         {/* STICKY ACTION BAR */}

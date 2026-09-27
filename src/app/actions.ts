@@ -327,9 +327,9 @@ const normalize = (value: string) => value.trim().toLowerCase()
 /**
  * Carga el catálogo por defecto en el catálogo de la empresa del usuario.
  *
- * - `if-empty` (por defecto): sólo actúa si la empresa no tiene ninguna fase.
+ * - `if-empty` (por defecto): sólo actúa si la empresa no tiene ninguna sección.
  * - `merge`: añade únicamente las partidas que faltan (por código, y por nombre
- *   dentro de la misma fase). No borra nada. Es la opción segura para empresas
+ *   dentro de la misma sección). No borra nada. Es la opción segura para empresas
  *   que ya tienen su propio catálogo importado.
  * - `replace`: borra el catálogo de la empresa y carga el catálogo por defecto.
  *   Destructivo: la UI debe pedir confirmación explícita.
@@ -458,7 +458,7 @@ export async function seedDefaultCatalog(options?: { mode?: SeedMode }): Promise
 }
 
 /**
- * Para las páginas que necesitan catálogo: si la empresa no tiene ninguna fase,
+ * Para las páginas que necesitan catálogo: si la empresa no tiene ninguna sección,
  * carga el catálogo por defecto. Si ya tiene catálogo, no hace nada.
  */
 export async function ensureCatalog(): Promise<{ seeded: boolean; services: number }> {

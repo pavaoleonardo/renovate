@@ -36,12 +36,12 @@ const FEATURES = [
   {
     icon: LayoutGrid,
     title: 'Tu catálogo, listo desde el minuto uno',
-    text: 'Empiezas con 42 partidas repartidas en 9 fases de reforma. Edítalas, añade las tuyas o impórtalas desde tu Excel en un clic.',
+    text: 'Empiezas con 42 partidas repartidas en 9 secciones de reforma. Edítalas, añade las tuyas o impórtalas desde tu Excel en un clic.',
   },
   {
     icon: MousePointerClick,
     title: 'Editor ágil, sin pelearte con el formato',
-    text: 'Crea fases y partidas, reordénalas arrastrando, ajusta cantidades y deja una nota por línea para explicar cada trabajo.',
+    text: 'Crea secciones y partidas, reordénalas arrastrando, ajusta cantidades y deja una nota por línea para explicar cada trabajo.',
   },
   {
     icon: FileText,
@@ -66,12 +66,12 @@ const STEPS = [
 ];
 
 const CHECKLIST = [
-  'Catálogo propio por empresa, con 42 partidas y 9 fases para empezar',
+  'Catálogo propio por empresa, con 42 partidas y 9 secciones para empezar',
   'Importación desde Excel y edición en línea de nombre, unidad y precio',
   'Banda de mercado por partida, para revisar el precio antes de enviarlo',
   'Nota por línea redactada en lenguaje de cliente e incluida en el PDF',
   'IA que adapta las partidas técnicas a un texto que el cliente entiende',
-  'Fases, partidas y notas: el presupuesto se estructura como la obra',
+  'Secciones, partidas y notas: el presupuesto se estructura como la obra',
   'Estados del presupuesto y caducidad automática de las ofertas antiguas',
   'Ajustes de empresa con logo, CIF, dirección y teléfono para el PDF',
   'Presupuestos agrupados por año, para encontrar cualquier obra al instante',
