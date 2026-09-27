@@ -12,6 +12,12 @@ const config: Config = {
         background: "var(--background)",
         foreground: "var(--foreground)",
       },
+      maxWidth: {
+        // Single content frame for the whole app (nav, lists, editor, landing).
+        // Wider than the previous max-w-5xl (1024px) so the layout matches the
+        // competing estimate tools, which run ~1220px+ on a desktop screen.
+        shell: "1400px",
+      },
     },
   },
   plugins: [],

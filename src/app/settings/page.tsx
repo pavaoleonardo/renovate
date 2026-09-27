@@ -74,7 +74,7 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="max-w-2xl mx-auto py-12 px-4">
+      <div className="max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-zinc-200 rounded w-48"></div>
           <div className="h-64 bg-zinc-100 rounded-xl"></div>
@@ -84,7 +84,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto py-12 px-4">
+    <div className="max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
       <div className="mb-8">
         <h1 className="text-3xl font-extrabold text-zinc-900 tracking-tight flex items-center gap-3">
           <Building2 className="text-blue-600" size={28} />

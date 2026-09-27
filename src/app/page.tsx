@@ -104,7 +104,7 @@ export default async function Home() {
           className="pointer-events-none absolute inset-x-0 -top-48 h-[460px] bg-gradient-to-b from-blue-50 to-transparent"
         />
 
-        <div className="relative max-w-5xl mx-auto px-4 pt-16 pb-20 md:pt-24 md:pb-28 grid gap-14 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+        <div className="relative max-w-shell mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-20 md:pt-24 md:pb-28 grid gap-14 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
           <div>
             <span className="inline-flex items-center gap-2 bg-white border border-zinc-200 text-zinc-600 text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">
               <Sparkles size={14} className="text-blue-600" />
@@ -203,7 +203,7 @@ export default async function Home() {
       </section>
 
       {/* ============================= FEATURES ============================= */}
-      <section className="max-w-5xl mx-auto px-4 pb-16 md:pb-20 w-full">
+      <section className="max-w-shell mx-auto px-4 sm:px-6 lg:px-8 pb-16 md:pb-20 w-full">
         <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-zinc-900">
           Todo lo que necesitas para presupuestar
         </h2>
@@ -230,7 +230,7 @@ export default async function Home() {
 
       {/* =========================== CÓMO FUNCIONA =========================== */}
       <section className="bg-white border-y border-zinc-200">
-        <div className="max-w-5xl mx-auto px-4 py-16 md:py-20 w-full">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-20 w-full">
           <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-zinc-900">
             Cómo funciona
           </h2>
@@ -255,7 +255,7 @@ export default async function Home() {
       </section>
 
       {/* ============================ CHECKLIST ============================ */}
-      <section className="max-w-5xl mx-auto px-4 py-16 md:py-20 w-full">
+      <section className="max-w-shell mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-20 w-full">
         <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
           <div>
             <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-zinc-900">
@@ -295,7 +295,7 @@ export default async function Home() {
       </section>
 
       {/* ============================ CTA FINAL ============================ */}
-      <section className="max-w-5xl mx-auto px-4 pb-16 md:pb-20 w-full">
+      <section className="max-w-shell mx-auto px-4 sm:px-6 lg:px-8 pb-16 md:pb-20 w-full">
         <div className="bg-blue-600 rounded-3xl px-6 py-12 md:px-12 md:py-14 text-center shadow-lg">
           <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight text-white">
             Tu próximo presupuesto, hoy mismo
@@ -318,7 +318,7 @@ export default async function Home() {
 
       {/* ============================== FOOTER ============================== */}
       <footer className="border-t border-zinc-200 bg-white mt-auto">
-        <div className="max-w-5xl mx-auto px-4 py-8 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="max-w-shell mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <p className="font-extrabold tracking-tighter text-zinc-900 text-center md:text-left">
             RENOVATE<span className="text-blue-600">.</span>
           </p>

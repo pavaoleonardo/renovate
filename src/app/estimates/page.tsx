@@ -77,7 +77,7 @@ export default async function EstimatesList() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto py-12 px-4">
+    <div className="max-w-shell mx-auto py-12 px-4 sm:px-6 lg:px-8">
       <div className="flex justify-between items-center mb-10 flex-col md:flex-row gap-4">
         <div>
           {company && <p className="text-sm font-bold text-blue-600 uppercase tracking-widest mb-1">{company.name}</p>}

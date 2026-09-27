@@ -268,7 +268,7 @@ export default function EstimateEditor({
 
   return (
     <>
-      <div className="no-print-area max-w-5xl mx-auto py-10 px-4 min-h-screen pb-40">
+      <div className="no-print-area max-w-shell mx-auto py-10 px-4 sm:px-6 lg:px-8 min-h-screen pb-40">
         
         {/* HEADER ... rest of editor ... */}
         {/* (I'll keep the same structure but ensuring the no-print-area div closes before the modal) */}
@@ -579,7 +579,7 @@ export default function EstimateEditor({
         </div>
 
         {/* STICKY ACTION BAR */}
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-5xl bg-white border border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-4 px-6 md:px-8 flex justify-between items-center rounded-2xl z-50 print:hidden">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-shell bg-white border border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-4 px-6 md:px-8 flex justify-between items-center rounded-2xl z-50 print:hidden">
           <div>
             <button 
               onClick={handleSave} 

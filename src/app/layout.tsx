@@ -33,7 +33,7 @@ export default async function RootLayout({
 
         {/* Global Nav MVP */}
         <nav className="bg-white border-b border-zinc-200 shadow-sm sticky top-0 z-40">
-          <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <Link href="/" className="font-extrabold text-xl tracking-tighter text-zinc-900">
               RENOVATE<span className="text-blue-600">.</span>
             </Link>
