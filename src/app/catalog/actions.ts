@@ -695,6 +695,22 @@ export async function processExcelUpload(formData: FormData) {
       }))
     })
 
+    const totalServices = parsed.phases.reduce((total, phase) => total + phase.services.length, 0)
+
+    // Never wipe a catalog to store nothing: a document in which every row was read as a
+    // section title (the units in the name column, the descriptions somewhere else)
+    // parses into sections with zero partidas. That used to be saved as a success, which
+    // left the catalog full of empty sections and lost the partidas it had. Refused here,
+    // before `clearCatalog`, so nothing is deleted.
+    if (newPhases.length === 0 || totalServices === 0) {
+      throw new Error(
+        `No se encontró ninguna partida en el documento: se leyeron ${newPhases.length} ` +
+          'secciones y 0 líneas, así que no se ha tocado tu catálogo. Comprueba que las ' +
+          'descripciones están en una columna (no la de unidades) y que la fila de ' +
+          'cabeceras está completa.'
+      )
+    }
+
     // Replace by default (wipes the company's catalog first); 'merge' appends
     const mode = (formData.get('mode') as string) === 'merge' ? 'merge' : 'replace'
 
@@ -712,12 +728,6 @@ export async function processExcelUpload(formData: FormData) {
       console.error('Error addPhaseAndServices:', err)
       const msg = err instanceof Error ? err.message : 'Desconocido'
       throw new Error(`Error guardando en base de datos: ${msg}`)
-    }
-
-    // Count total services
-    let totalServices = 0
-    for (const key of Object.keys(phaseServicesMap)) {
-      totalServices += phaseServicesMap[Number(key)]?.length || 0
     }
 
     return { success: true, message: `Se importaron ${newPhases.length} secciones y ${totalServices} partidas correctamente.` }
