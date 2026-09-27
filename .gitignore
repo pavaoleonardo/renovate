@@ -21,6 +21,9 @@
 *.pem
 *.md
 *.pdf
+# keep agent working rules versioned (AGENTS.md / .github/copilot-instructions.md)
+!AGENTS.md
+!.github/copilot-instructions.md
 
 # debug
 npm-debug.log*
