@@ -11,6 +11,7 @@ import {
   updateCatalogService,
 } from './actions'
 import { ensureCatalog, searchCatalog, seedDefaultCatalog } from '@/app/actions'
+import { DOCUMENT_ACCEPT, DOCUMENT_FORMATS_TEXT } from '@/lib/document-formats'
 import { AlertCircle, CheckCircle2, Box, Plus, RefreshCw, Sparkles, Trash2, UploadCloud } from 'lucide-react'
 import { CatalogService, ExcelPreview } from '@/types'
 
@@ -28,8 +29,12 @@ export default function CatalogPage() {
   const [importMode, setImportMode] = useState<'replace' | 'merge'>('replace')
   const [result, setResult] = useState<{ success: boolean; text: string } | null>(null)
   const [showAdd, setShowAdd] = useState(false)
-  /** What the app understood from the selected Excel, before anything is saved. */
+  /** What the app understood from the selected document, before anything is saved. */
   const [preview, setPreview] = useState<ExcelPreview | null>(null)
+  /** Price column picked by hand (0 = A) or null to keep the detected one. */
+  const [priceCol, setPriceCol] = useState<number | null>(null)
+  /** Import only the partidas, without prices, for a budget that carries none. */
+  const [noPrices, setNoPrices] = useState(false)
   const [seedStep, setSeedStep] = useState<null | 'choose' | 'confirm-replace'>(null)
   const [newService, setNewService] = useState({ phaseId: '', name: '', unit: 'ud', price: '' })
 
@@ -83,26 +88,52 @@ export default function CatalogPage() {
   }
 
   /**
-   * Selecting a file analyses it straight away: the catalog is only touched when
-   * the user confirms what the preview shows.
+   * Analyses a document with the overrides the user has chosen. Selecting a file
+   * runs it straight away; changing the price column or asking for "no prices"
+   * runs it again on the same file. The catalog is only touched when the user
+   * confirms what the preview shows.
    */
+  const analyse = useCallback(
+    async (selected: File, options: { priceCol: number | null; noPrices: boolean }) => {
+      setBusy(true)
+      setResult(null)
+
+      const formData = new FormData()
+      formData.append('file', selected)
+      if (options.priceCol !== null) formData.append('priceCol', String(options.priceCol))
+      if (options.noPrices) formData.append('noPrices', '1')
+
+      const res = await previewExcelUpload(formData)
+      setBusy(false)
+
+      if (res.success) {
+        setPreview(res.preview ?? null)
+      } else {
+        setPreview(null)
+        setResult({ success: false, text: res.error || 'No se pudo analizar el documento.' })
+      }
+    },
+    []
+  )
+
   const handleFileChange = async (selected: File | null) => {
     setFile(selected)
     setPreview(null)
+    setPriceCol(null)
+    setNoPrices(false)
     setResult(null)
     if (!selected) return
 
-    setBusy(true)
-    const formData = new FormData()
-    formData.append('file', selected)
-    const res = await previewExcelUpload(formData)
-    setBusy(false)
+    await analyse(selected, { priceCol: null, noPrices: false })
+  }
 
-    if (res.success) {
-      setPreview(res.preview ?? null)
-    } else {
-      setResult({ success: false, text: res.error || 'No se pudo analizar el Excel.' })
-    }
+  /** Re-reads the file with another price column or without prices at all. */
+  const applyOverrides = async (next: { priceCol?: number | null; noPrices?: boolean }) => {
+    const nextPriceCol = next.priceCol !== undefined ? next.priceCol : priceCol
+    const nextNoPrices = next.noPrices !== undefined ? next.noPrices : noPrices
+    setPriceCol(nextPriceCol)
+    setNoPrices(nextNoPrices)
+    if (file) await analyse(file, { priceCol: nextPriceCol, noPrices: nextNoPrices })
   }
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -114,16 +145,20 @@ export default function CatalogPage() {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('mode', importMode)
+    if (priceCol !== null) formData.append('priceCol', String(priceCol))
+    if (noPrices) formData.append('noPrices', '1')
 
     const res = await processExcelUpload(formData)
     setBusy(false)
     if (res.success) {
       setFile(null)
       setPreview(null)
-      setResult({ success: true, text: res.message || 'Excel importado.' })
+      setPriceCol(null)
+      setNoPrices(false)
+      setResult({ success: true, text: res.message || 'Documento importado.' })
       await fetchCatalog()
     } else {
-      setResult({ success: false, text: res.error || 'No se pudo importar el Excel.' })
+      setResult({ success: false, text: res.error || 'No se pudo importar el documento.' })
     }
   }
 
@@ -285,7 +320,7 @@ export default function CatalogPage() {
                   </p>
                   <p className="mt-1 leading-snug">
                     Se eliminarán <strong>{services.length} partidas</strong> de tu catálogo —incluidas las que hayas
-                    importado de Excel— y se sustituirán por las 42 del catálogo por defecto.{' '}
+                    importado de un documento— y se sustituirán por las 42 del catálogo por defecto.{' '}
                     <strong>No se puede deshacer.</strong>
                   </p>
                 </div>
@@ -379,16 +414,17 @@ export default function CatalogPage() {
       )}
 
       <div className="bg-white p-6 rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 mb-8">
-        <h3 className="font-bold text-zinc-800 mb-3 text-sm uppercase tracking-wider">Importar desde Excel</h3>
+        <h3 className="font-bold text-zinc-800 mb-3 text-sm uppercase tracking-wider">Importar documento</h3>
         <div className="space-y-3">
           <label className="border-2 border-dashed border-blue-200 bg-blue-50/50 hover:bg-blue-50 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition w-full">
             <UploadCloud size={24} className="text-blue-600 mb-2" />
             <span className="font-bold text-blue-900 text-sm">
-              {file ? file.name : 'Haz clic o arrastra tu archivo .xlsx'}
+              {file ? file.name : 'Haz clic o arrastra tu presupuesto'}
             </span>
+            <span className="text-[11px] text-blue-900/60 mt-1 text-center">{DOCUMENT_FORMATS_TEXT}</span>
             <input
               type="file"
-              accept=".xlsx,.xls"
+              accept={DOCUMENT_ACCEPT}
               className="hidden"
               onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
             />
@@ -419,8 +455,61 @@ export default function CatalogPage() {
                   {preview.sectionColumn
                     ? `secciones por la columna ${preview.sectionColumn.letter}` +
                       (preview.sectionColumn.header ? ` («${preview.sectionColumn.header}»)` : '')
-                    : 'secciones por los títulos del Excel'}
+                    : 'secciones por los títulos del documento'}
                 </p>
+                <p className="text-[11px] text-zinc-400 font-medium">
+                  {preview.documentKind}: {preview.fileName}
+                  {preview.sheets.length > 0
+                    ? ` · ${preview.sheets.length === 1 ? 'hoja' : 'hojas'} ${preview.sheets
+                        .map((sheet) => `«${sheet.name}» (${sheet.services} partidas)`)
+                        .join(', ')}`
+                    : ''}
+                </p>
+              </div>
+
+              <div className="p-3 bg-zinc-50 border-b border-zinc-100 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-wide text-zinc-400 mb-1">
+                    Columna con el precio
+                  </label>
+                  <select
+                    value={priceCol === null ? 'auto' : String(priceCol)}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      // Picking a column by hand means you want its numbers as prices.
+                      if (value === 'auto') applyOverrides({ priceCol: null })
+                      else applyOverrides({ priceCol: Number(value), noPrices: false })
+                    }}
+                    disabled={busy}
+                    className="w-full px-2.5 py-2 rounded-lg border border-zinc-200 bg-white text-sm font-medium disabled:opacity-60"
+                  >
+                    <option value="auto">
+                      Automática: columna {preview.priceColumn.letter}
+                      {preview.priceColumn.header ? ` («${preview.priceColumn.header}»)` : ''}
+                      {preview.priceColumn.detectedByHeader
+                        ? ' — por la cabecera'
+                        : preview.priceColumn.chosenByUser
+                          ? ' — elegida por ti'
+                          : ' — la de más números'}
+                    </option>
+                    {preview.columns.map((column) => (
+                      <option key={column.index} value={column.index}>
+                        {column.letter}
+                        {column.header ? ` «${column.header}»` : ' (sin cabecera)'} —{' '}
+                        {column.samples.length > 0 ? column.samples.join(' · ') : 'vacía'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <label className="flex items-center gap-2 text-xs font-bold text-zinc-700 whitespace-nowrap pb-2.5">
+                  <input
+                    type="checkbox"
+                    checked={noPrices}
+                    onChange={(e) => applyOverrides({ noPrices: e.target.checked })}
+                    disabled={busy}
+                  />
+                  Importar sin precio
+                </label>
               </div>
 
               {preview.warnings.length > 0 && (
@@ -473,13 +562,25 @@ export default function CatalogPage() {
               </div>
 
               <p className="p-2.5 bg-zinc-50 border-t border-zinc-100 text-[11px] text-zinc-500 font-medium">
-                Lo que ves a la derecha es <strong>exactamente lo que se guardará como precio</strong> de cada partida:
-                columna {preview.priceColumn.letter}
-                {preview.priceColumn.header ? `, «${preview.priceColumn.header}»` : ' (la de más números)'}. La descripción sale
-                de la columna {preview.nameColumn.letter}
-                {preview.nameColumn.header ? ` («${preview.nameColumn.header}»)` : ''} y la unidad de la {preview.unitColumn.letter}
-                {preview.unitColumn.header ? ` («${preview.unitColumn.header}»)` : ''}. Si un inodoro aparece a 1,00 €, ese 1,00 €
-                es el precio que se guardará: probablemente el Excel ha traído mediciones en lugar de tarifas.
+                Lo que ves arriba es <strong>exactamente lo que se guardará como precio</strong> de cada partida:
+                {preview.ignorePrices ? (
+                  <> sin precio, tal como has pedido</>
+                ) : (
+                  <>
+                    {' '}
+                    columna {preview.priceColumn.letter}
+                    {preview.priceColumn.header ? `, «${preview.priceColumn.header}»` : ' (la de más números)'}
+                  </>
+                )}
+                . La descripción sale de la columna {preview.nameColumn.letter}
+                {preview.nameColumn.header ? ` («${preview.nameColumn.header}»)` : ''}
+                {preview.unitColumn.letter
+                  ? ` y la unidad de la ${preview.unitColumn.letter}${
+                      preview.unitColumn.header ? ` («${preview.unitColumn.header}»)` : ''
+                    }`
+                  : ' y la unidad por defecto (ud)'}
+                . Si un inodoro aparece a 1,00 €, ese 1,00 € es el precio que se guardará: probablemente el documento trae
+                mediciones en lugar de tarifas, así que elige la columna correcta aquí arriba o marca «importar sin precio».
               </p>
             </div>
           )}
@@ -489,13 +590,14 @@ export default function CatalogPage() {
             disabled={!file || !preview || busy}
             className="w-full bg-zinc-900 disabled:bg-zinc-300 hover:bg-black text-white px-6 py-3 rounded-xl font-bold transition active:scale-[0.99]"
           >
-            {busy ? 'Procesando…' : preview ? 'Confirmar importación' : 'Importar Excel'}
+            {busy ? 'Procesando…' : preview ? 'Confirmar importación' : 'Importar documento'}
           </button>
           <p className="text-[11px] text-zinc-400 leading-snug">
-            Se admiten .xlsx y .xls. El precio se lee de la columna que anuncie el resumen («Precio», «PVP», «Importe»…); si
-            la hoja no tiene cabecera, de la que más números tenga. Las secciones se leen de una columna
-            «Fase / Capítulo / Sección / Grupo» cuando existe y, si no existe, de las filas de título sin unidad ni precio. Al
-            elegir el archivo verás qué se va a guardar antes de tocar el catálogo.
+            Se leen <strong>todas las hojas</strong> del archivo, no sólo la primera. El precio se busca por la cabecera
+            («Precio», «PVP», «Importe»…) y, si no la hay, en la columna con más números —nunca en una columna de
+            cantidades o mediciones—; las secciones salen de una columna tipo «Fase / Capítulo / Sección / Grupo» o, si
+            no existe, de los títulos del propio documento. Todo eso se puede cambiar en el resumen de arriba antes de
+            confirmar. Formatos admitidos: {DOCUMENT_FORMATS_TEXT}.
           </p>
         </div>
       </div>
@@ -517,7 +619,7 @@ export default function CatalogPage() {
         <div className="bg-white rounded-2xl border border-zinc-100 p-12 text-center">
           <p className="text-zinc-500 font-medium">Tu catálogo está vacío.</p>
           <p className="text-zinc-400 text-sm mt-1">
-            Pulsa «Cargar catálogo por defecto» o sube tu propio Excel.
+            Pulsa «Cargar catálogo por defecto» o sube tu propio documento (Excel, PDF, Word, CSV…).
           </p>
         </div>
       ) : (

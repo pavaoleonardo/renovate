@@ -86,9 +86,37 @@ export interface ExcelPreviewPhase {
   services: ExcelPreviewService[];
 }
 
+/** One column of the uploaded document, with a sample of what is inside it. */
+export interface ExcelPreviewColumn {
+  index: number;
+  letter: string;
+  header: string;
+  /** First few values of the column («12,35», «45,90»…), to recognise it at a glance. */
+  samples: string[];
+  /** How many cells of the column hold a number. */
+  numbers: number;
+}
+
+/** Sheet of the document partidas were actually read from. */
+export interface ExcelPreviewSheet {
+  name: string;
+  phases: number;
+  services: number;
+}
+
 export interface ExcelPreview {
+  /** Name of the uploaded file. */
+  fileName: string;
+  /** Excel, CSV, PDF, Word… as read by the server. */
+  documentKind: string;
+  /** Only the sheets that contributed partidas. */
+  sheets: ExcelPreviewSheet[];
+  /** Columns of the sheet used, so the user can pick the price column by hand. */
+  columns: ExcelPreviewColumn[];
+  /** True when the user asked to import every line without a price. */
+  ignorePrices: boolean;
   phases: ExcelPreviewPhase[];
-  priceColumn: { letter: string; header: string; detectedByHeader: boolean };
+  priceColumn: { letter: string; header: string; detectedByHeader: boolean; chosenByUser: boolean };
   /**
    * Column the sections were read from, when the sheet has one. `null` means the
    * sections were guessed from the title rows of the sheet.

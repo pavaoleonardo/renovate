@@ -1,6 +1,6 @@
 'use server'
 
-import * as xlsx from 'xlsx'
+import { DocumentSheet, DocumentSheets, readDocumentSheets } from '@/lib/document-rows'
 import { CatalogService, CatalogPhase, ExcelPreview } from '@/types'
 import { addPhaseAndServices } from '@/app/actions'
 import { catalogErrorMessage } from '@/lib/catalog-errors'
@@ -35,6 +35,28 @@ interface ParsedPhase {
   services: ParsedService[]
 }
 
+/** One column of the document, described for the chooser in the preview. */
+interface DetectedColumn {
+  index: number
+  letter: string
+  header: string
+  /** First few values of the column, so the user sees what is inside it. */
+  samples: string[]
+  numbers: number
+}
+
+/** How the price column was decided. */
+type PriceSource = 'header' | 'numbers' | 'user'
+
+/**
+ * What the user asked for in the preview: change the price column or import
+ * every line without a price (a budget that only carries measurements).
+ */
+export interface LayoutOverride {
+  priceCol?: number | null
+  ignorePrices?: boolean
+}
+
 /** Where the price and the sections really live in the sheet. */
 interface DetectedLayout {
   nameCol: number
@@ -42,6 +64,8 @@ interface DetectedLayout {
   priceCol: number
   priceHeader: string
   priceDetectedByHeader: boolean
+  priceSource: PriceSource
+  ignorePrices: boolean
   headerRowIndex: number | null
   /**
    * Column that groups partidas into sections ("Fase", "Capítulo", "Sección"…).
@@ -52,6 +76,7 @@ interface DetectedLayout {
   sectionHeader: string
   nameHeader: string
   unitHeader: string
+  columns: DetectedColumn[]
 }
 
 interface ParsedSheet {
@@ -61,6 +86,16 @@ interface ParsedSheet {
   suspiciousPrices: number
   suspiciousExamples: string[]
   emptySectionNames: string[]
+  warnings: string[]
+}
+
+/** Result of reading a whole document: the sheets it took partidas from, joined. */
+interface ParsedDocument {
+  phases: ParsedPhase[]
+  layout: DetectedLayout
+  usedSheets: { name: string; phases: number; services: number }[]
+  missingPrices: number
+  suspiciousPrices: number
   warnings: string[]
 }
 
@@ -96,6 +131,13 @@ const HEADER_PATTERNS = {
   unit: /^\s*u\.?d\b|^\s*unidad|^\s*medida|^\s*m2|^\s*m3|^\s*ml/i,
   price: /precio|pvp|importe|coste|tarifa|€|euro/i,
   quantity: /cantidad|^\s*cant\b|medici/i,
+  /**
+   * Column with the total of the line. It is only used to recognise an export
+   * whose real prices are missing: if «Precio final» is empty in every row while
+   * the column titled «Precio» carries small numbers, those numbers are the
+   * measurements, not the rates.
+   */
+  finalPrice: /precio\s*(final|total)|importe|total/i,
   // Column that groups the partidas into sections. Any of these captions is
   // enough; the word used by one particular file is not required.
   section: /fase|cap[íi]tulo|secci[óo]n|grupo|bloque|apartado/i
@@ -112,6 +154,13 @@ const HEADER_PATTERNS = {
  */
 const SECTION_TITLE_PATTERNS =
   /^\s*((fase|cap[íi]tulo|secci[óo]n|apartado|bloque|grupo|tajo|zona|actuaci[óo]n|conjunto)s?|unidades? de obra)\b/i
+
+/**
+ * A title row made only of numbers and currency symbols («152,25», «€ 3.400») is a
+ * total that lost its label (or a stray measurement), never a section: it is
+ * skipped instead of becoming an empty section.
+ */
+const NUMBER_ONLY_TITLE = /^[\s\d€$.,*+\-–—]+$/
 
 const cellText = (value: unknown) => (value === null || value === undefined ? '' : String(value).trim())
 
@@ -135,50 +184,35 @@ function normalizeUnit(raw: string): string {
 }
 
 /**
- * Reads the first sheet of the uploaded file as rectangular rows.
+ * Reads every sheet of the uploaded document that holds partidas.
  *
- * `defval` is not a detail: without it `sheet_to_json` returns ragged rows (in a
- * real price list 1795 of 1903 rows were shorter than the header), so a missing
- * cell shifts the reading to a different column and a quantity column can be
- * read as the price without any error.
+ * Multi-sheet workbooks are the norm in the files this app receives (a «Fases»
+ * sheet with the sections and a «Servicios» sheet with the prices, for instance),
+ * so the first sheet is no longer assumed to be the good one: each one is parsed
+ * and the sheets without partidas are ignored.
  */
-async function readFirstSheet(formData: FormData): Promise<unknown[][]> {
-  const file = formData.get('file') as File
-  if (!file) throw new Error('No se encontró el archivo')
+async function readDocument(formData: FormData): Promise<DocumentSheets> {
+  const file = formData.get('file') as File | null
+  if (!file || typeof file.arrayBuffer !== 'function') {
+    throw new Error('No se encontró el archivo')
+  }
+  return readDocumentSheets(file)
+}
 
-  const arrayBuffer = await file.arrayBuffer()
+/** Reads the override the user picked in the preview (price column, no prices). */
+function layoutOverrideFrom(formData: FormData): LayoutOverride {
+  const rawPriceCol = formData.get('priceCol')
+  const override: LayoutOverride = {}
 
-  let workbook
-  try {
-    workbook = xlsx.read(new Uint8Array(arrayBuffer), { type: 'array' })
-  } catch (err) {
-    console.error('Error xlsx.read:', err)
-    throw new Error('El archivo no tiene un formato Excel válido o está corrupto.')
+  if (rawPriceCol !== null && String(rawPriceCol).trim() !== '') {
+    const parsed = Number(rawPriceCol)
+    if (Number.isInteger(parsed) && parsed >= 0) override.priceCol = parsed
   }
 
-  if (!workbook || !workbook.SheetNames || !Array.isArray(workbook.SheetNames) || workbook.SheetNames.length === 0) {
-    throw new Error('El archivo Excel está vacío o no tiene hojas válidas')
-  }
+  const rawNoPrices = formData.get('noPrices')
+  if (rawNoPrices !== null && String(rawNoPrices) === '1') override.ignorePrices = true
 
-  const worksheet = workbook.Sheets[workbook.SheetNames[0]]
-  if (!worksheet) {
-    throw new Error('No se pudo leer la primera hoja del Excel')
-  }
-
-  let rows: unknown[][] = []
-  try {
-    const parsed = xlsx.utils.sheet_to_json(worksheet, { header: 1, defval: '', blankrows: false })
-    rows = Array.isArray(parsed) ? (parsed as unknown[][]) : []
-  } catch (err) {
-    console.error('Error sheet_to_json:', err)
-    throw new Error('Error al decodificar la estructura del Excel.')
-  }
-
-  if (rows.length === 0) {
-    throw new Error('La hoja de Excel parece no tener datos (filas vacías).')
-  }
-
-  return rows
+  return override
 }
 
 /**
@@ -191,7 +225,7 @@ async function readFirstSheet(formData: FormData): Promise<unknown[][]> {
  * when there is no usable header we take the column that is numeric the most
  * often instead of guessing row by row.
  */
-function detectLayout(rows: unknown[][]): DetectedLayout {
+function detectLayout(rows: unknown[][], override: LayoutOverride = {}): DetectedLayout {
   const width = rows.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0)
 
   const numericDensity = (col: number) => {
@@ -239,6 +273,9 @@ function detectLayout(rows: unknown[][]): DetectedLayout {
   // Does that column really group rows? A caption "Fase" with no value under it
   // is just a stray label, and it can never be the column we already read as the
   // description (e.g. "Descripción de la fase").
+  const headerCells: string[] = headerRowIndex === null ? [] : (rows[headerRowIndex] || []).map(cellText)
+  const isQuantityHeader = (col: number) => HEADER_PATTERNS.quantity.test(headerCells[col] || '')
+
   const sectionValues = new Set<string>()
   if (sectionCol !== -1) {
     for (let i = (headerRowIndex ?? -1) + 1; i < rows.length; i++) {
@@ -266,17 +303,38 @@ function detectLayout(rows: unknown[][]): DetectedLayout {
     let fallbackDensity = 0
     for (let col = 2; col < Math.max(width, 3); col++) {
       if (col === nameCol || col === unitCol || col === sectionCol) continue
+      // A column headed «Cantidad»/«Medición» is never the price, not even when it
+      // is the only one with numbers: those numbers are the measurements.
+      if (isQuantityHeader(col)) continue
       const density = numericDensity(col)
       if (density > fallbackDensity) {
         fallbackCol = col
         fallbackDensity = density
       }
     }
-    priceCol = fallbackCol
+
+    if (fallbackCol === -1 && priceCandidates.size > 0) {
+      // The document has a column named «Precio» but it is empty in every row: it
+      // is a budget still to be priced. Keep that column (the import will warn and
+      // store the partidas without a price) instead of refusing the document.
+      priceCol = Array.from(priceCandidates)[0]
+      priceDetectedByHeader = true
+    } else {
+      priceCol = fallbackCol
+    }
+  }
+
+  let priceSource: PriceSource = priceDetectedByHeader ? 'header' : 'numbers'
+
+  // What the user chose in the preview wins over anything we guessed.
+  if (typeof override.priceCol === 'number' && override.priceCol >= 0 && override.priceCol < Math.max(width, 1)) {
+    priceCol = override.priceCol
+    priceSource = 'user'
+    priceDetectedByHeader = false
   }
 
   if (priceCol === -1) {
-    throw new Error('No se encontró ninguna columna con precios en el Excel: añade una columna «Precio» a la hoja y vuelve a intentarlo.')
+    throw new Error('No se encontró ninguna columna con precios en el documento: elige la columna del precio a mano o añade una columna «Precio» y vuelve a intentarlo.')
   }
 
   // Files without headers keep the historical layout: A = unit, B = description
@@ -288,7 +346,12 @@ function detectLayout(rows: unknown[][]): DetectedLayout {
   }
   if (unitCol === -1) {
     const preferred = priceCol === 0 ? 1 : 0
-    unitCol = [preferred, 0, 1, 2].find(col => col !== nameCol && col !== priceCol && col !== sectionCol) ?? preferred
+    const unitCandidates = [preferred, 0, 1, 2].filter(
+      col => col !== nameCol && col !== priceCol && col !== sectionCol && !isQuantityHeader(col)
+    )
+    // No unit column at all is better than a column of measurements: without a unit
+    // the partidas fall back to «ud», with quantities read as units they do not.
+    unitCol = unitCandidates[0] ?? -1
   }
 
   // Only now are all four columns final, so this is where the section column can
@@ -297,7 +360,20 @@ function detectLayout(rows: unknown[][]): DetectedLayout {
     sectionCol = -1
   }
 
-  const headerCells = headerRowIndex === null ? [] : (rows[headerRowIndex] || []).map(cellText)
+  // Every column is described for the chooser of the preview, so the user can see
+  // what is inside each one («Precio»: 12,35 · 45,90 · 780,50) before confirming.
+  const columns: DetectedColumn[] = []
+  const firstDataRow = (headerRowIndex ?? -1) + 1
+  for (let col = 0; col < width; col++) {
+    const samples: string[] = []
+    let numbers = 0
+    for (let i = firstDataRow; i < rows.length; i++) {
+      const value = cellText((rows[i] || [])[col])
+      if (parseNumberCell(value) !== null) numbers++
+      if (value && samples.length < 3) samples.push(value.length > 24 ? `${value.slice(0, 23)}…` : value)
+    }
+    columns.push({ index: col, letter: columnLetter(col), header: headerCells[col] || '', samples, numbers })
+  }
 
   return {
     nameCol,
@@ -305,11 +381,14 @@ function detectLayout(rows: unknown[][]): DetectedLayout {
     priceCol,
     priceHeader: headerCells[priceCol] || '',
     priceDetectedByHeader,
+    priceSource,
+    ignorePrices: override.ignorePrices === true,
     headerRowIndex,
     sectionCol: sectionCol === -1 ? null : sectionCol,
     sectionHeader: sectionCol === -1 ? '' : (headerCells[sectionCol] || ''),
     nameHeader: headerCells[nameCol] || '',
-    unitHeader: headerCells[unitCol] || ''
+    unitHeader: headerCells[unitCol] || '',
+    columns
   }
 }
 
@@ -318,8 +397,8 @@ function detectLayout(rows: unknown[][]): DetectedLayout {
  * Shared by the preview shown on /catalog and by the real import, so what the
  * user approves is exactly what gets stored.
  */
-function parseCatalogSheet(rows: unknown[][]): ParsedSheet {
-  const layout = detectLayout(rows)
+function parseCatalogSheet(rows: unknown[][], override: LayoutOverride = {}): ParsedSheet {
+  const layout = detectLayout(rows, override)
   const warnings: string[] = []
   const suspiciousExamples: string[] = []
   const emptySectionNames: string[] = []
@@ -327,6 +406,7 @@ function parseCatalogSheet(rows: unknown[][]): ParsedSheet {
   const phases: ParsedPhase[] = []
   const sectionIndexByName = new Map<string, number>()
   let missingPrices = 0
+  let pricedServices = 0
   let suspiciousPrices = 0
   let currentPhase = -1
   let currentGroup = ''
@@ -363,13 +443,23 @@ function parseCatalogSheet(rows: unknown[][]): ParsedSheet {
     if (!nameCell && !unitCell) continue
     if (nameCell.toLowerCase().includes('total') || unitCell.toLowerCase().includes('total')) continue
 
-    // Never import the header row itself as if it were a partida (and the same
-    // for a repeated header if the sheet has several blocks).
+    // Never import the header row itself as if it were a partida (and the same for
+    // a header repeated below: the second page of a PDF, a new block in the sheet).
+    // Two or more cells with heading words make a header row; a cell holding a value
+    // («€ 18,82») is not a heading, and «Ud.» alone is not counted because it is also
+    // written next to a real title («Fase 1 … Ud»).
     const looksLikeHeader =
       i === layout.headerRowIndex ||
-      (HEADER_PATTERNS.name.test(nameCell) &&
-        HEADER_PATTERNS.unit.test(unitCell) &&
-        HEADER_PATTERNS.price.test(cellText(row[layout.priceCol])))
+      (row || []).reduce((hits: number, cell) => {
+        const text = cellText(cell)
+        if (!text || text.length > 30 || parseNumberCell(cell) !== null) return hits
+        const heading =
+          HEADER_PATTERNS.name.test(text) ||
+          HEADER_PATTERNS.price.test(text) ||
+          HEADER_PATTERNS.quantity.test(text) ||
+          HEADER_PATTERNS.section.test(text)
+        return heading ? hits + 1 : hits
+      }, 0) >= 2
     if (looksLikeHeader) continue
 
     if (layout.sectionCol !== null) {
@@ -392,32 +482,34 @@ function parseCatalogSheet(rows: unknown[][]): ParsedSheet {
       const isSectionHeader = price === null && ((nameCell !== '' && unitCell === '') || headingText !== '')
 
       if (isSectionHeader) {
-        openSection(headingText || nameCell)
+        const title = (headingText || nameCell).trim()
+        if (!NUMBER_ONLY_TITLE.test(title)) openSection(title)
         continue
       }
     }
 
     if (!nameCell) continue
 
-    const hasPrice = price !== null && price !== 0
-    if (!hasPrice) missingPrices++
+    const hasPrice = !layout.ignorePrices && price !== null && price !== 0
+    if (hasPrice) pricedServices++
+    else missingPrices++
 
     // Prices of 1,00–5,00 € on whole units are the classic symptom of reading a
     // measurements column ("7 ventanas", "1 inodoro") as if it were the price.
-    if (price !== null && price > 0 && price <= 5 && Number.isInteger(price)) {
+    if (hasPrice && price !== null && price > 0 && price <= 5 && Number.isInteger(price)) {
       suspiciousPrices++
       if (suspiciousExamples.length < 3) suspiciousExamples.push(`«${nameCell}» = ${price.toFixed(2)} €`)
     }
 
     if (currentPhase === -1) {
-      phases.push({ name: 'Importado de Excel', services: [] })
+      phases.push({ name: 'Sin sección', services: [] })
       currentPhase = 0
     }
 
     phases[currentPhase].services.push({
       name: nameCell,
       unit: normalizeUnit(unitCell),
-      base_price: price ?? 0,
+      base_price: hasPrice && price !== null ? price : 0,
       hasPrice
     })
   }
@@ -431,22 +523,70 @@ function parseCatalogSheet(rows: unknown[][]): ParsedSheet {
   })
 
   if (usedPhases.length === 0) {
-    throw new Error('No se encontró ninguna partida en el Excel: revisa que las descripciones estén en la columna correcta.')
+    throw new Error('No se encontró ninguna partida en el documento: revisa que las descripciones estén en la columna correcta.')
   }
 
   const priceColumnLabel = `${columnLetter(layout.priceCol)}${layout.priceDetectedByHeader && layout.priceHeader ? `, «${layout.priceHeader}»` : ''}`
+  const priceColumn = layout.columns.find((column) => column.index === layout.priceCol)
 
-  if (missingPrices > 0) {
+  /** Column with a heading but not a single value below it. */
+  const isColumnEmpty = (col: number) => {
+    for (let i = layout.headerRowIndex === null ? 0 : layout.headerRowIndex + 1; i < rows.length; i++) {
+      if (cellText((rows[i] || [])[col]) !== '') return false
+    }
+    return true
+  }
+
+  const emptyQuantityColumn = layout.columns.find(
+    (column) => column.header !== '' && HEADER_PATTERNS.quantity.test(column.header) && isColumnEmpty(column.index)
+  )
+  const emptyFinalPriceColumn = layout.columns.find(
+    (column) =>
+      column.index !== layout.priceCol &&
+      column.header !== '' &&
+      HEADER_PATTERNS.finalPrice.test(column.header) &&
+      isColumnEmpty(column.index)
+  )
+
+  if (layout.ignorePrices) {
+    warnings.push(
+      `Has pedido importar sin precios: las ${pricedServices + missingPrices} partidas se guardarán con 0,00 € para que pongas tus tarifas en el catálogo.`
+    )
+  } else if (pricedServices === 0) {
+    warnings.push(
+      layout.priceSource === 'user'
+        ? `La columna ${columnLetter(layout.priceCol)} que has elegido no tiene números: las ${missingPrices} partidas se guardarán sin precio. Elige otra columna o marca «importar sin precio».`
+        : `El documento no trae precios (la columna ${priceColumnLabel} está vacía o a 0 en todas las líneas): las ${missingPrices} partidas se importarán sin precio, para que pongas tus tarifas en el catálogo.`
+    )
+  } else if (missingPrices > 0) {
     warnings.push(
       `${missingPrices} partida${missingPrices === 1 ? '' : 's'} sin precio en la columna ${priceColumnLabel}: ` +
       'se importarán con 0,00 € y tendrás que ponerles el precio a mano.'
     )
   }
 
+  // Budgets exported from a program that measures and rates in two steps arrive
+  // like this: «Cantidad» and «Precio final» empty on every line while the column
+  // titled «Precio» holds small numbers (the measurements). Nothing is changed
+  // behind the user's back: the preview warns and offers the switch.
+  const suspiciousRatio = suspiciousPrices / Math.max(pricedServices, 1)
+  if (emptyQuantityColumn && emptyFinalPriceColumn && pricedServices > 0 && suspiciousRatio >= 0.4) {
+    // Only figures: the chosen column may hold words ("Ud.", "M2.") and quoting
+    // those next to "trae N números" would read like a contradiction.
+    const numericSamples = (priceColumn?.samples || []).filter((sample) => parseNumberCell(sample) !== null)
+    warnings.push(
+      `Ojo: la columna ${priceColumnLabel} trae ${pricedServices} números${
+        numericSamples.length > 0 ? ` (p. ej. ${numericSamples.join(' · ')})` : ''
+      }, pero ` +
+      `«${emptyQuantityColumn.header}» (col. ${emptyQuantityColumn.letter}) y «${emptyFinalPriceColumn.header}» (col. ${emptyFinalPriceColumn.letter}) ` +
+      'están vacías en todas las filas. Parece un presupuesto de mediciones sin tarifas: si es el caso, marca «importar sin precio» o elige otra columna.'
+    )
+  }
+
   if (suspiciousPrices >= 3) {
     warnings.push(
       `${suspiciousPrices} partidas con un precio de 5,00 € o menos (p. ej. ${suspiciousExamples.join(', ')}). ` +
-      'Si tu Excel tiene una columna de mediciones y otra de precios, comprueba que han entrado los precios y no las cantidades ' +
+      'Si tu documento tiene una columna de mediciones y otra de precios, comprueba que han entrado los precios y no las cantidades ' +
       `(columna leída: ${columnLetter(layout.priceCol)}).`
     )
   }
@@ -454,7 +594,7 @@ function parseCatalogSheet(rows: unknown[][]): ParsedSheet {
   if (mergedSectionNames.length > 0) {
     warnings.push(
       `${mergedSectionNames.length} secci${mergedSectionNames.length === 1 ? 'ón' : 'ones'} aparecía${mergedSectionNames.length === 1 ? '' : 'n'} ` +
-      `en varios bloques del Excel (p. ej. «${mergedSectionNames[0].slice(0, 40)}»): se ha${mergedSectionNames.length === 1 ? '' : 'n'} ` +
+      `en varios bloques del documento (p. ej. «${mergedSectionNames[0].slice(0, 40)}»): se ha${mergedSectionNames.length === 1 ? '' : 'n'} ` +
       'unido en una sola para no duplicarlas.'
     )
   }
@@ -477,11 +617,72 @@ function parseCatalogSheet(rows: unknown[][]): ParsedSheet {
   }
 }
 
+/**
+ * Parses every sheet of the document that holds partidas and joins the result, so
+ * a workbook split in several sheets («Fases» + «Servicios») is read whole instead
+ * of taking the first sheet for granted.
+ */
+function parseDocument(sheets: DocumentSheet[], override: LayoutOverride = {}): ParsedDocument {
+  const usedSheets: ParsedDocument['usedSheets'] = []
+  const mergedPhases = new Map<string, ParsedPhase>()
+  const warnings: string[] = []
+  const failures: { sheet: string; message: string }[] = []
+  let layout: DetectedLayout | null = null
+  let missingPrices = 0
+  let suspiciousPrices = 0
+
+  for (const sheet of sheets) {
+    let parsed: ParsedSheet
+    try {
+      parsed = parseCatalogSheet(sheet.rows, override)
+    } catch (err) {
+      failures.push({ sheet: sheet.name, message: err instanceof Error ? err.message : 'no se pudo leer la hoja' })
+      continue
+    }
+
+    const services = parsed.phases.reduce((total, phase) => total + phase.services.length, 0)
+    usedSheets.push({ name: sheet.name, phases: parsed.phases.length, services })
+    missingPrices += parsed.missingPrices
+    suspiciousPrices += parsed.suspiciousPrices
+    if (!layout) layout = parsed.layout
+
+    for (const warning of parsed.warnings) {
+      // With a single sheet a warning is about the document; with several it has to
+      // say which sheet it comes from.
+      warnings.push(sheets.length > 1 ? `Hoja «${sheet.name}»: ${warning}` : warning)
+    }
+
+    for (const phase of parsed.phases) {
+      const key = phase.name.trim().toLowerCase()
+      const existing = mergedPhases.get(key)
+      if (existing) existing.services.push(...phase.services)
+      else mergedPhases.set(key, { name: phase.name, services: [...phase.services] })
+    }
+  }
+
+  if (!layout) {
+    const noPartidas = failures.find((failure) => failure.message.includes('partida'))
+    throw new Error(
+      (noPartidas ?? failures[0])?.message ||
+        'No se encontró ninguna partida en el documento: revisa que las descripciones estén en la columna correcta.'
+    )
+  }
+
+  return {
+    phases: Array.from(mergedPhases.values()),
+    layout,
+    usedSheets,
+    missingPrices,
+    suspiciousPrices,
+    warnings
+  }
+}
+
 export async function processExcelUpload(formData: FormData) {
-  console.log('--- Iniciando procesamiento de Excel ---')
+  console.log('--- Iniciando procesamiento del documento ---')
   try {
-    const rows = await readFirstSheet(formData)
-    const parsed = parseCatalogSheet(rows)
+    const document = await readDocument(formData)
+    const parsed = parseDocument(document.sheets, layoutOverrideFrom(formData))
 
     const newPhases: Omit<CatalogPhase, 'id'>[] = parsed.phases.map(phase => ({ name: phase.name }))
     const phaseServicesMap: Record<number, Omit<CatalogService, 'id' | 'phase_id'>[]> = {}
@@ -529,19 +730,24 @@ export async function processExcelUpload(formData: FormData) {
 }
 
 /**
- * Analyses the uploaded file WITHOUT saving anything, so /catalog can show which
- * column was read as the price and what each line will become. This is what
+ * Analyses the uploaded document WITHOUT saving anything, so /catalog can show
+ * which column was read as the price and what each line will become. This is what
  * catches a mislabelled sheet (quantities in a column headed "Precio") before it
  * replaces the catalog.
  */
 export async function previewExcelUpload(formData: FormData) {
   try {
-    const rows = await readFirstSheet(formData)
-    const parsed = parseCatalogSheet(rows)
+    const document = await readDocument(formData)
+    const parsed = parseDocument(document.sheets, layoutOverrideFrom(formData))
 
     const services = parsed.phases.reduce((total, phase) => total + phase.services.length, 0)
 
     const preview: ExcelPreview = {
+      fileName: document.fileName,
+      documentKind: document.kind,
+      sheets: parsed.usedSheets,
+      columns: parsed.layout.columns,
+      ignorePrices: parsed.layout.ignorePrices,
       phases: parsed.phases.map(phase => ({
         name: phase.name,
         services: phase.services.map(service => ({
@@ -554,7 +760,8 @@ export async function previewExcelUpload(formData: FormData) {
       priceColumn: {
         letter: columnLetter(parsed.layout.priceCol),
         header: parsed.layout.priceHeader,
-        detectedByHeader: parsed.layout.priceDetectedByHeader
+        detectedByHeader: parsed.layout.priceDetectedByHeader,
+        chosenByUser: parsed.layout.priceSource === 'user'
       },
       sectionColumn:
         parsed.layout.sectionCol === null
@@ -564,7 +771,10 @@ export async function previewExcelUpload(formData: FormData) {
               header: parsed.layout.sectionHeader
             },
       nameColumn: { letter: columnLetter(parsed.layout.nameCol), header: parsed.layout.nameHeader },
-      unitColumn: { letter: columnLetter(parsed.layout.unitCol), header: parsed.layout.unitHeader },
+      unitColumn: {
+        letter: parsed.layout.unitCol < 0 ? '' : columnLetter(parsed.layout.unitCol),
+        header: parsed.layout.unitHeader
+      },
       headerRow: parsed.layout.headerRowIndex === null ? null : parsed.layout.headerRowIndex + 1,
       totals: {
         phases: parsed.phases.length,
