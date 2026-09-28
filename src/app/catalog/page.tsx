@@ -13,13 +13,17 @@ import {
 import { ensureCatalog, searchCatalog, seedDefaultCatalog } from '@/app/actions'
 import { DOCUMENT_ACCEPT, DOCUMENT_FORMATS_TEXT } from '@/lib/document-formats'
 import { SOURCE_KIND_LABELS, formatReviewDate, isPriceStale, shortPriceSource } from '@/lib/price-basis'
-import { AlertCircle, CheckCircle2, Box, Plus, RefreshCw, Sparkles, Trash2, UploadCloud } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Box, Download, Plus, RefreshCw, Search, Sparkles, Trash2, UploadCloud, X } from 'lucide-react'
 import { CatalogService, ExcelPreview } from '@/types'
 
 const UNITS = ['m2', 'ml', 'm3', 'ud', 'kg', 'h', 'vg']
 
 const eur = (value: number) =>
   value.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 })
+
+/** Accent- and case-insensitive key, so «alicatado» finds «Alicatado» and «gotele» finds «gotelé». */
+const searchKey = (value: string) =>
+  value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 
 /**
  * One grid template shared by the column header and every row of the "Partidas"
@@ -76,6 +80,7 @@ export default function CatalogPage() {
   const [importMode, setImportMode] = useState<'replace' | 'merge'>('replace')
   const [result, setResult] = useState<{ success: boolean; text: string } | null>(null)
   const [showAdd, setShowAdd] = useState(false)
+  const [query, setQuery] = useState('')
   /** What the app understood from the selected document, before anything is saved. */
   const [preview, setPreview] = useState<ExcelPreview | null>(null)
   /** Price column picked by hand (0 = A) or null to keep the detected one. */
@@ -257,7 +262,16 @@ export default function CatalogPage() {
     await fetchCatalog()
   }
 
-  const grouped = services.reduce((acc, service) => {
+  // Filtering happens on the client: the whole catalogue is already in memory, so
+  // typing never waits for a request. Code, name and description are all searched.
+  const term = searchKey(query.trim())
+  const visible = term
+    ? services.filter((service) =>
+        searchKey(`${service.code ?? ''} ${service.name} ${service.description ?? ''}`).includes(term),
+      )
+    : services
+
+  const grouped = visible.reduce((acc, service) => {
     const phaseName = service.phase_name || 'Sin categoría'
     if (!acc[phaseName]) acc[phaseName] = []
     acc[phaseName].push(service)
@@ -272,10 +286,33 @@ export default function CatalogPage() {
             <Box size={28} className="text-blue-600" /> Mi Catálogo
           </h1>
           <p className="text-zinc-500 mt-2 font-medium">
-            {loading ? 'Cargando…' : `${services.length} partidas en ${Object.keys(grouped).length} secciones`}
+            {loading
+              ? 'Cargando…'
+              : term
+                ? `${visible.length} de ${services.length} partidas para «${query.trim()}»`
+                : `${services.length} partidas en ${Object.keys(grouped).length} secciones`}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search lives in the toolbar but filters client-side: no request per keystroke. */}
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar partida o código…"
+              className="w-full sm:w-56 bg-white border border-zinc-200 rounded-xl pl-9 pr-8 py-2.5 text-sm font-medium text-zinc-900 placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 outline-none transition"
+            />
+            {query && (
+              <button
+                onClick={() => setQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-400 hover:text-zinc-900 transition"
+                title="Borrar la búsqueda"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
           <button
             onClick={() => setSeedStep('choose')}
             disabled={busy}
@@ -297,6 +334,13 @@ export default function CatalogPage() {
           >
             <Plus size={16} /> Sección
           </button>
+          <a
+            href="/api/catalog/template"
+            className="flex items-center gap-2 bg-white border border-zinc-200 hover:bg-zinc-100 text-zinc-900 px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95"
+            title="Descarga tus partidas en Excel, edítalas y vuelve a importarlas"
+          >
+            <Download size={16} /> Plantilla Excel
+          </a>
         </div>
       </div>
 
@@ -667,6 +711,14 @@ export default function CatalogPage() {
           <p className="text-zinc-500 font-medium">Tu catálogo está vacío.</p>
           <p className="text-zinc-400 text-sm mt-1">
             Pulsa «Cargar catálogo por defecto» o sube tu propio documento (Excel, PDF, Word, CSV…).
+          </p>
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-zinc-100 p-12 text-center">
+          <p className="text-zinc-500 font-medium">Ninguna partida coincide con «{query.trim()}».</p>
+          <p className="text-zinc-400 text-sm mt-1">
+            Se busca en el código, el nombre y la descripción. Borra la búsqueda para volver a ver las{' '}
+            {services.length} partidas.
           </p>
         </div>
       ) : (
