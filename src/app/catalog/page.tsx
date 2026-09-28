@@ -12,7 +12,8 @@ import {
 } from './actions'
 import { ensureCatalog, searchCatalog, seedDefaultCatalog } from '@/app/actions'
 import { DOCUMENT_ACCEPT, DOCUMENT_FORMATS_TEXT } from '@/lib/document-formats'
-import { SOURCE_KIND_LABELS, formatReviewDate, isPriceStale, shortPriceSource } from '@/lib/price-basis'
+import { MANUAL_PRICE_SOURCE, SOURCE_KIND_LABELS, formatReviewDate, isPriceStale, shortPriceSource, todayIsoDate } from '@/lib/price-basis'
+import { parsePriceInput } from '@/lib/price-input'
 import { AlertCircle, CheckCircle2, Box, Download, Plus, RefreshCw, Search, Sparkles, Trash2, UploadCloud, X } from 'lucide-react'
 import { CatalogService, ExcelPreview } from '@/types'
 
@@ -69,6 +70,39 @@ function PriceBasis({ service }: { service: CatalogService }) {
       )}
     </div>
   )
+}
+
+/**
+ * Where a hand-typed price sits relative to the market band of a partida.
+ * The band is a reference, never a limit: any value saves, is kept, and is what
+ * estimates use. Returns null for imported partidas, which carry no band.
+ */
+const priceBandState = (service: CatalogService) => {
+  const { base_price: price, price_min: min, price_max: max } = service
+  if (min == null || max == null) return null
+  const band = `${eur(min)} – ${eur(max)}`
+  if (price < min)
+    return { tone: 'below' as const, hint: `Por debajo de la banda de mercado (${band}). Es tu precio: se guarda tal cual.` }
+  if (price > max)
+    return { tone: 'above' as const, hint: `Por encima de la banda de mercado (${band}). Es tu precio: se guarda tal cual.` }
+  return { tone: 'inside' as const, hint: `Dentro de la banda de mercado (${band}).` }
+}
+
+/** Amber number when the price sits outside its band, so it stands out from the rest. */
+const priceTextClass = (service: CatalogService) => {
+  const state = priceBandState(service)
+  return state && state.tone !== 'inside' ? 'text-amber-700' : 'text-zinc-900'
+}
+
+/**
+ * Dot that says whether the price is inside the market band, next to the price field.
+ * The "Mercado" column is desktop-only, so this keeps the reference visible on a phone.
+ */
+function PriceBandDot({ service }: { service: CatalogService }) {
+  const state = priceBandState(service)
+  if (!state) return null
+  const tone = state.tone === 'inside' ? 'bg-emerald-500' : state.tone === 'below' ? 'bg-sky-500' : 'bg-amber-500'
+  return <span role="img" aria-label={state.hint} title={state.hint} className={`w-1.5 h-1.5 shrink-0 rounded-full ${tone}`} />
 }
 
 export default function CatalogPage() {
@@ -215,7 +249,14 @@ export default function CatalogPage() {
   }
 
   const handleUpdate = async (id: string, updates: { name?: string; unit?: string; base_price?: number }) => {
-    setServices((prev) => prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
+    // A hand-typed price is the company's own, so the row drops the seeded market-band
+    // basis immediately — `updateCatalogService` writes the very same values to the
+    // database, this only avoids showing a stale badge until the next load.
+    const optimistic =
+      updates.base_price !== undefined
+        ? { ...updates, price_source: MANUAL_PRICE_SOURCE, price_reviewed_at: todayIsoDate() }
+        : updates
+    setServices((prev) => prev.map((s) => (s.id === id ? { ...s, ...optimistic } : s)))
     const res = await updateCatalogService(id, updates)
     if (!res.success) setResult({ success: false, text: res.error || 'No se pudo guardar el cambio.' })
   }
@@ -781,19 +822,41 @@ export default function CatalogPage() {
                         }
                         className="w-full text-xs font-bold text-zinc-500 uppercase bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 rounded px-1.5 py-1 text-center transition"
                       />
-                      {/* Editable number plus its currency, so the price reads like a real amount. */}
-                      <div className="flex items-center justify-end gap-1">
+                      {/* Editable number plus its currency: the field keeps a visible box, so
+                          the price never reads as plain text. Any number saves — the band in
+                          «Mercado» is a reference, not a limit — and the dot says whether the
+                          figure you set falls inside it. */}
+                      <div className="flex items-center justify-end gap-1.5 bg-zinc-50 border border-zinc-200 hover:border-zinc-300 focus-within:bg-white focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 rounded px-1.5 py-1 transition">
                         <input
                           defaultValue={service.base_price}
                           inputMode="decimal"
-                          onBlur={(e) => {
-                            const value = Number(e.target.value.replace(',', '.'))
-                            if (!Number.isNaN(value) && value !== service.base_price) {
-                              handleUpdate(service.id, { base_price: value })
-                            }
+                          aria-label={`Precio de ${service.name}`}
+                          title={`${
+                            priceBandState(service)?.hint ?? 'Precio editable.'
+                          } Escribe la cifra (18,82 o 1.234,56) y pulsa Intro.`}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.currentTarget.blur()
                           }}
-                          className="flex-1 min-w-0 text-right font-bold text-zinc-900 tabular-nums text-sm bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 transition"
+                          onBlur={(e) => {
+                            const raw = e.target.value
+                            const value = parsePriceInput(raw)
+                            if (value === null) {
+                              // No number to read: keep the stored price instead of saving a 0.
+                              setResult({
+                                success: false,
+                                text: `«${raw}» no es un precio: se mantiene ${eur(service.base_price)}.`,
+                              })
+                              e.target.value = String(service.base_price)
+                              return
+                            }
+                            if (value === service.base_price) return
+                            // Show the number as it was understood before saving it.
+                            e.target.value = String(value)
+                            handleUpdate(service.id, { base_price: value })
+                          }}
+                          className={`flex-1 min-w-0 text-right font-bold tabular-nums text-sm bg-transparent outline-none ${priceTextClass(service)}`}
                         />
+                        <PriceBandDot service={service} />
                         <span className="text-[11px] font-bold text-zinc-400">€</span>
                       </div>
                       <button
@@ -823,6 +886,12 @@ export default function CatalogPage() {
         Los precios del catálogo por defecto son orientativos (banda de mercado España 2026). Revísalos y ajústalos a
         tus tarifas: el precio guardado aquí es el que se usará en tus próximos presupuestos. También puedes cambiar el
         precio de una línea concreta dentro de un presupuesto sin afectar al catálogo.
+      </p>
+
+      <p className="text-[11px] text-zinc-400 mt-3 leading-relaxed">
+        La columna «Mercado» es solo una referencia: puedes fijar cualquier precio, dentro o fuera de la banda. El
+        punto junto al precio indica dónde cae el tuyo (verde dentro, ámbar por encima, azul por debajo) y un precio
+        propio pasa a figurar como «Precio propio · fijado a mano».
       </p>
 
       <p className="text-[11px] text-zinc-400 mt-3 leading-relaxed">

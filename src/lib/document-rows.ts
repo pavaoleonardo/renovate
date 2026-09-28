@@ -187,7 +187,7 @@ function workbookSheets(workbook: xlsx.WorkBook): DocumentSheet[] {
 
 function parseWorkbook(source: Uint8Array | string): DocumentSheet[] {
   // `raw: true` for text files (CSV/TSV): SheetJS would otherwise read "12,35" as
-  // 1235 (it takes the comma for a thousands separator), while parseNumberCell
+  // 1235 (it takes the comma for a thousands separator), while parsePriceInput
   // understands the Spanish format of the same cell.
   const workbook =
     typeof source === 'string'

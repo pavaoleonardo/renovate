@@ -44,3 +44,14 @@ export const isPriceStale = (reviewedAt?: string | null, now: Date = new Date())
   const reviewed = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
   return now.getTime() - reviewed > PRICE_REVIEW_MAX_AGE_DAYS * 24 * 60 * 60 * 1000
 }
+
+/**
+ * Basis stamped on a price the company sets by hand. Once the figure stops being the
+ * seeded draft, the row must stop claiming the market-band draft as its source.
+ * Lives here (not in the `'use server'` action module) so the catalogue page can apply
+ * the same stamp optimistically, without waiting for a reload.
+ */
+export const MANUAL_PRICE_SOURCE = 'Precio propio · fijado a mano'
+
+/** Today as 'YYYY-MM-DD', the format of `catalog_services.price_reviewed_at`. */
+export const todayIsoDate = (now: Date = new Date()) => now.toISOString().slice(0, 10)

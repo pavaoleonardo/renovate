@@ -4,6 +4,8 @@ import { DocumentSheet, DocumentSheets, readDocumentSheets } from '@/lib/documen
 import { CatalogService, CatalogPhase, ExcelPreview } from '@/types'
 import { addPhaseAndServices } from '@/app/actions'
 import { catalogErrorMessage } from '@/lib/catalog-errors'
+import { MANUAL_PRICE_SOURCE, todayIsoDate } from '@/lib/price-basis'
+import { parsePriceInput } from '@/lib/price-input'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 
@@ -97,33 +99,6 @@ interface ParsedDocument {
   missingPrices: number
   suspiciousPrices: number
   warnings: string[]
-}
-
-/**
- * Turns a cell into a number. Accepts numbers and the text people actually
- * type in an Excel price column ("1.234,56 €", "18,82", "1,234.56").
- */
-function parseNumberCell(raw: unknown): number | null {
-  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null
-  if (raw === null || raw === undefined) return null
-
-  let text = String(raw).trim()
-  if (!text) return null
-
-  text = text.replace(/[^\d.,-]/g, '')
-  if (!/\d/.test(text)) return null
-
-  const lastComma = text.lastIndexOf(',')
-  const lastDot = text.lastIndexOf('.')
-  if (lastComma > -1 && lastDot > -1) {
-    // The right-most separator is the decimal one (1.234,56 vs 1,234.56)
-    text = lastComma > lastDot ? text.replace(/\./g, '').replace(',', '.') : text.replace(/,/g, '')
-  } else if (lastComma > -1) {
-    text = text.replace(',', '.')
-  }
-
-  const value = Number(text)
-  return Number.isFinite(value) ? value : null
 }
 
 const HEADER_PATTERNS = {
@@ -235,7 +210,7 @@ function detectLayout(rows: unknown[][], override: LayoutOverride = {}): Detecte
       const cell = row[col]
       if (cell === '' || cell === null || cell === undefined) continue
       filled++
-      if (parseNumberCell(cell) !== null) numeric++
+      if (parsePriceInput(cell) !== null) numeric++
     }
     return filled === 0 ? -1 : numeric / filled
   }
@@ -369,7 +344,7 @@ function detectLayout(rows: unknown[][], override: LayoutOverride = {}): Detecte
     let numbers = 0
     for (let i = firstDataRow; i < rows.length; i++) {
       const value = cellText((rows[i] || [])[col])
-      if (parseNumberCell(value) !== null) numbers++
+      if (parsePriceInput(value) !== null) numbers++
       if (value && samples.length < 3) samples.push(value.length > 24 ? `${value.slice(0, 23)}…` : value)
     }
     columns.push({ index: col, letter: columnLetter(col), header: headerCells[col] || '', samples, numbers })
@@ -438,7 +413,7 @@ function parseCatalogSheet(rows: unknown[][], override: LayoutOverride = {}): Pa
     const row = rows[i]
     const unitCell = cellText(row[layout.unitCol])
     const nameCell = cellText(row[layout.nameCol])
-    const price = parseNumberCell(row[layout.priceCol])
+    const price = parsePriceInput(row[layout.priceCol])
 
     if (!nameCell && !unitCell) continue
     if (nameCell.toLowerCase().includes('total') || unitCell.toLowerCase().includes('total')) continue
@@ -452,7 +427,7 @@ function parseCatalogSheet(rows: unknown[][], override: LayoutOverride = {}): Pa
       i === layout.headerRowIndex ||
       (row || []).reduce((hits: number, cell) => {
         const text = cellText(cell)
-        if (!text || text.length > 30 || parseNumberCell(cell) !== null) return hits
+        if (!text || text.length > 30 || parsePriceInput(cell) !== null) return hits
         const heading =
           HEADER_PATTERNS.name.test(text) ||
           HEADER_PATTERNS.price.test(text) ||
@@ -573,7 +548,7 @@ function parseCatalogSheet(rows: unknown[][], override: LayoutOverride = {}): Pa
   if (emptyQuantityColumn && emptyFinalPriceColumn && pricedServices > 0 && suspiciousRatio >= 0.4) {
     // Only figures: the chosen column may hold words ("Ud.", "M2.") and quoting
     // those next to "trae N números" would read like a contradiction.
-    const numericSamples = (priceColumn?.samples || []).filter((sample) => parseNumberCell(sample) !== null)
+    const numericSamples = (priceColumn?.samples || []).filter((sample) => parsePriceInput(sample) !== null)
     warnings.push(
       `Ojo: la columna ${priceColumnLabel} trae ${pricedServices} números${
         numericSamples.length > 0 ? ` (p. ej. ${numericSamples.join(' · ')})` : ''
@@ -832,7 +807,19 @@ export async function updateCatalogService(
   const clean: Record<string, unknown> = {}
   if (updates.name !== undefined) clean.name = updates.name.trim()
   if (updates.unit !== undefined) clean.unit = updates.unit.trim() || 'ud'
-  if (updates.base_price !== undefined) clean.base_price = updates.base_price
+  if (updates.base_price !== undefined) {
+    // Any figure is allowed on purpose — inside or outside the market band — but a
+    // negative or non-finite price is a typo, never a decision.
+    if (!Number.isFinite(updates.base_price) || updates.base_price < 0) {
+      return { success: false, error: 'El precio tiene que ser un número igual o mayor que 0.' }
+    }
+    clean.base_price = updates.base_price
+    // A hand-typed price becomes the company's own: re-stamp the basis and the review
+    // date so the row no longer reads as the seeded market-band draft (and stops
+    // flagging "Revisar precio" for a figure a human just looked at).
+    clean.price_source = MANUAL_PRICE_SOURCE
+    clean.price_reviewed_at = todayIsoDate()
+  }
   if (updates.description !== undefined) clean.description = updates.description
 
   if (Object.keys(clean).length === 0) return { success: true }
