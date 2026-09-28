@@ -24,8 +24,10 @@
 # keep agent working rules versioned (AGENTS.md / .github/copilot-instructions.md)
 !AGENTS.md
 !.github/copilot-instructions.md
-# keep product docs versioned (catalogue price basis, maintenance notes); SPEC.md stays local
-!docs/**/*.md
+# Product docs stay local-only (SPEC.md, README.md, docs/**): git is not their backup.
+# The durable homes are the local file, the Obsidian mirror and Engram. AGENTS.md and
+# .github/copilot-instructions.md above are the only deliberate *.md exceptions.
+# Re-check after editing: `git check-ignore -v docs/catalogo-precios.md` must match *.md.
 
 # debug
 npm-debug.log*
