@@ -24,6 +24,8 @@
 # keep agent working rules versioned (AGENTS.md / .github/copilot-instructions.md)
 !AGENTS.md
 !.github/copilot-instructions.md
+# keep product docs versioned (catalogue price basis, maintenance notes); SPEC.md stays local
+!docs/**/*.md
 
 # debug
 npm-debug.log*
