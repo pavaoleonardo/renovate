@@ -12,6 +12,7 @@ import {
 } from './actions'
 import { ensureCatalog, searchCatalog, seedDefaultCatalog } from '@/app/actions'
 import { DOCUMENT_ACCEPT, DOCUMENT_FORMATS_TEXT } from '@/lib/document-formats'
+import { SOURCE_KIND_LABELS, formatReviewDate, isPriceStale, shortPriceSource } from '@/lib/price-basis'
 import { AlertCircle, CheckCircle2, Box, Plus, RefreshCw, Sparkles, Trash2, UploadCloud } from 'lucide-react'
 import { CatalogService, ExcelPreview } from '@/types'
 
@@ -29,6 +30,42 @@ const eur = (value: number) =>
 const PARTIDA_COLUMNS = 'grid items-center gap-2 md:gap-3'
 const PARTIDA_COLUMNS_BASE = `${PARTIDA_COLUMNS} grid-cols-[1fr_48px_96px_28px] md:grid-cols-[1fr_64px_112px_32px]`
 const PARTIDA_COLUMNS_MARKET = `${PARTIDA_COLUMNS} grid-cols-[1fr_48px_96px_28px] md:grid-cols-[1fr_64px_112px_32px_170px]`
+
+/**
+ * Where the price of a partida comes from: the short basis tag, what drives its
+ * cost, when a human last looked at it, and a badge once that review is over a year
+ * old. Seeded partidas have all of it; imported ones have none, so they render
+ * nothing instead of an empty row of labels.
+ */
+function PriceBasis({ service }: { service: CatalogService }) {
+  const source = shortPriceSource(service.price_source)
+  if (!source) return null
+
+  const reviewed = formatReviewDate(service.price_reviewed_at)
+  const stale = isPriceStale(service.price_reviewed_at)
+  const driver = service.source_kind ? SOURCE_KIND_LABELS[service.source_kind] : null
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mt-1.5 pl-1.5">
+      <span
+        className="text-[10px] font-bold uppercase tracking-wide text-zinc-500 bg-zinc-100 rounded px-1.5 py-0.5"
+        title={[service.price_source, reviewed && `revisado ${reviewed}`].filter(Boolean).join(' · ')}
+      >
+        {source}
+      </span>
+      {driver && <span className="text-[10px] text-zinc-400">{driver}</span>}
+      {reviewed && <span className="text-[10px] text-zinc-400">revisado {reviewed}</span>}
+      {stale && (
+        <span
+          className="text-[10px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5"
+          title={`Sin revisar desde hace más de un año (última revisión: ${reviewed ?? 'desconocida'}).`}
+        >
+          Revisar precio
+        </span>
+      )}
+    </div>
+  )
+}
 
 export default function CatalogPage() {
   const [services, setServices] = useState<CatalogService[]>([])
@@ -683,6 +720,7 @@ export default function CatalogPage() {
                         {service.description && (
                           <p className="text-[11px] text-zinc-400 mt-1 pl-1.5 leading-snug">{service.description}</p>
                         )}
+                        <PriceBasis service={service} />
                       </div>
                       <input
                         defaultValue={service.unit}
@@ -733,6 +771,14 @@ export default function CatalogPage() {
         Los precios del catálogo por defecto son orientativos (banda de mercado España 2026). Revísalos y ajústalos a
         tus tarifas: el precio guardado aquí es el que se usará en tus próximos presupuestos. También puedes cambiar el
         precio de una línea concreta dentro de un presupuesto sin afectar al catálogo.
+      </p>
+
+      <p className="text-[11px] text-zinc-400 mt-3 leading-relaxed">
+        Cada partida del catálogo por defecto indica de dónde sale su precio: <strong>borrador propio</strong>{' '}
+        contrastado con bandas de mercado, <strong>no</strong> una base de precios con licencia (BEDEC, IVE, BCCA o CYPE
+        Generador de precios). La etiqueta <em>Borrador propio</em>, la fecha de revisión y el aviso{' '}
+        <em>Revisar precio</em> (más de un año sin revisar) se refieren siempre a esa procedencia. Las partidas que
+        importas de tus documentos no llevan etiqueta porque el precio es tuyo.
       </p>
     </div>
   )

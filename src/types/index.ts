@@ -37,6 +37,16 @@ export interface EstimateRow {
 
 export type CatalogUnit = 'm2' | 'ml' | 'm3' | 'ud' | 'vg' | 'h' | 'kg';
 
+/**
+ * What drives the cost of a partida — labour, material, both, or an administrative
+ * fee. It is a cost driver, not a provenance claim: the basis itself is written in
+ * `price_source` (see docs/catalogo-precios.md).
+ */
+export type PriceSourceKind = 'labour' | 'material' | 'mixed' | 'admin-fee';
+
+/** Trade category the labour hours of a partida are priced at. */
+export type LabourCategory = 'peón' | 'of.1' | 'of.2' | 'espec.' | 'téc.';
+
 export interface CatalogService {
   id: string;
   name: string;
@@ -52,6 +62,19 @@ export interface CatalogService {
   price_max?: number | null;
   /** 'catalogo_base' | 'excel' | 'manual' */
   origin?: string | null;
+  /** Basis shown under the price; never a licensed base name unless actually licensed. */
+  price_source?: string | null;
+  /** Public reference for this specific price; null when there is none. */
+  price_source_url?: string | null;
+  /** ISO date a human last reviewed this price; older than 12 months reads as stale. */
+  price_reviewed_at?: string | null;
+  /** Cost driver of the partida. */
+  source_kind?: PriceSourceKind | null;
+  /** Labour content per unit, recorded so a later job can recompute the price. */
+  labour_hours?: number | null;
+  labour_category?: LabourCategory | null;
+  /** Commodity family the material cost is anchored to. */
+  material_anchor?: string | null;
 }
 
 export interface CatalogPhase {

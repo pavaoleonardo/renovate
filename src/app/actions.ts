@@ -1,6 +1,6 @@
 'use server'
 
-import { Estimate, EstimateRow, CatalogService, CatalogPhase, CompanyProfile } from '@/types';
+import { Estimate, EstimateRow, CatalogService, CatalogPhase, CompanyProfile, LabourCategory, PriceSourceKind } from '@/types';
 import { DEFAULT_CATALOG } from '@/lib/default-catalog';
 import { catalogErrorMessage } from '@/lib/catalog-errors';
 import { computeTotals, normalizeTaxRate } from '@/lib/estimate-totals';
@@ -262,6 +262,13 @@ export async function searchCatalog(): Promise<CatalogService[]> {
       price_min: (s.price_min as number) ?? null,
       price_max: (s.price_max as number) ?? null,
       origin: (s.origin as string) ?? null,
+      price_source: (s.price_source as string) ?? null,
+      price_source_url: (s.price_source_url as string) ?? null,
+      price_reviewed_at: (s.price_reviewed_at as string) ?? null,
+      source_kind: (s.source_kind as PriceSourceKind) ?? null,
+      labour_hours: (s.labour_hours as number) ?? null,
+      labour_category: (s.labour_category as LabourCategory) ?? null,
+      material_anchor: (s.material_anchor as string) ?? null,
       _phaseOrder: phaseInfo?.order ?? 999,
     };
   });
@@ -309,6 +316,36 @@ export async function addPhaseAndServices(phases: Omit<CatalogPhase, 'id'>[], ph
       await supabase.from('catalog_services').insert(servicesToInsert);
     }
   }
+}
+
+/**
+ * Provenance fields of the default catalogue (migration 20260928000000). They are
+ * informative for the product, so when an environment has not run that migration
+ * yet the seed retries without them: a missing optional column must never leave a
+ * company without a catalogue.
+ */
+const PROVENANCE_FIELDS = [
+  'price_source',
+  'price_source_url',
+  'price_reviewed_at',
+  'source_kind',
+  'labour_hours',
+  'labour_category',
+  'material_anchor',
+] as const
+
+const isMissingProvenanceColumn = (message: string) => {
+  const text = message.toLowerCase()
+  return (
+    PROVENANCE_FIELDS.some((field) => text.includes(field)) &&
+    /does not exist|could not find|schema cache/.test(text)
+  )
+}
+
+const stripProvenance = (row: Record<string, unknown>): Record<string, unknown> => {
+  const copy: Record<string, unknown> = { ...row }
+  for (const field of PROVENANCE_FIELDS) delete copy[field]
+  return copy
 }
 
 type SeedMode = 'if-empty' | 'replace' | 'merge'
@@ -435,13 +472,28 @@ export async function seedDefaultCatalog(options?: { mode?: SeedMode }): Promise
         price_min: service.price_min,
         price_max: service.price_max,
         origin: 'catalogo_base',
+        source_kind: service.source_kind,
+        labour_hours: service.labour_hours,
+        labour_category: service.labour_category,
+        material_anchor: service.material_anchor,
+        price_source: service.price_source,
+        price_source_url: service.price_source_url,
+        price_reviewed_at: service.price_reviewed_at,
       }));
 
     if (rows.length === 0) continue;
 
     const { error: serviceError } = await supabase.from('catalog_services').insert(rows);
     if (serviceError) {
-      return { ...empty, phasesCreated, servicesCreated, servicesSkipped, success: false, error: catalogErrorMessage(serviceError.message) };
+      // Retry without the provenance fields when this environment has not applied
+      // migration 20260928000000 yet.
+      const fallback = isMissingProvenanceColumn(serviceError.message)
+        ? await supabase.from('catalog_services').insert(rows.map(stripProvenance))
+        : null;
+      if (!fallback || fallback.error) {
+        const failure = fallback?.error ?? serviceError;
+        return { ...empty, phasesCreated, servicesCreated, servicesSkipped, success: false, error: catalogErrorMessage(failure.message) };
+      }
     }
 
     for (const row of rows) {
