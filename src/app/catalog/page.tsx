@@ -20,6 +20,16 @@ const UNITS = ['m2', 'ml', 'm3', 'ud', 'kg', 'h', 'vg']
 const eur = (value: number) =>
   value.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 })
 
+/**
+ * One grid template shared by the column header and every row of the "Partidas"
+ * list, so Descripción / Ud / Precio / actions line up — no matter whether the
+ * partida comes from the default catalog or from an imported document. The
+ * market column only exists while a section has prices bands to show.
+ */
+const PARTIDA_COLUMNS = 'grid items-center gap-2 md:gap-3'
+const PARTIDA_COLUMNS_BASE = `${PARTIDA_COLUMNS} grid-cols-[1fr_48px_96px_28px] md:grid-cols-[1fr_64px_112px_32px]`
+const PARTIDA_COLUMNS_MARKET = `${PARTIDA_COLUMNS} grid-cols-[1fr_48px_96px_28px] md:grid-cols-[1fr_64px_112px_32px_170px]`
+
 export default function CatalogPage() {
   const [services, setServices] = useState<CatalogService[]>([])
   const [phases, setPhases] = useState<{ id: string; name: string }[]>([])
@@ -527,7 +537,7 @@ export default function CatalogPage() {
                 <div className="px-3 py-1.5 grid grid-cols-[1fr_48px_92px] gap-2 text-[10px] font-black uppercase tracking-wide text-zinc-400 bg-white border-b border-zinc-100">
                   <span>Descripción</span>
                   <span className="text-center">Ud</span>
-                  <span className="text-right">Precio en tu catálogo</span>
+                  <span className="text-right whitespace-nowrap">Precio (€)</span>
                 </div>
                 {preview.phases.map((phase) => (
                   <div key={phase.name}>
@@ -624,20 +634,38 @@ export default function CatalogPage() {
         </div>
       ) : (
         <div className="space-y-6">
-          {Object.entries(grouped).map(([phaseName, list]) => (
-            <div
-              key={phaseName}
-              className="bg-white rounded-2xl border border-zinc-100 overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.02)]"
-            >
-              <div className="bg-zinc-50 px-5 py-3 border-b border-zinc-100 flex items-center justify-between">
-                <h3 className="font-bold text-zinc-800 uppercase tracking-wider text-xs">{phaseName}</h3>
-                <span className="text-[11px] font-bold text-zinc-400">{list.length} partidas</span>
-              </div>
-              <div className="divide-y divide-zinc-50">
-                {list.map((service) => (
-                  <div key={service.id} className="px-5 py-3 hover:bg-zinc-50/60 transition">
-                    <div className="flex items-start gap-3">
-                      <div className="flex-1 min-w-0">
+          {Object.entries(grouped).map(([phaseName, list]) => {
+            // Only the default catalog carries a market band, so the column shows
+            // up when the section has one: imported partidas never sit in an empty column.
+            const withMarket = list.some((s) => s.price_min != null && s.price_max != null)
+            const columns = withMarket ? PARTIDA_COLUMNS_MARKET : PARTIDA_COLUMNS_BASE
+
+            return (
+              <div
+                key={phaseName}
+                className="bg-white rounded-2xl border border-zinc-100 overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.02)]"
+              >
+                <div className="bg-zinc-50 px-5 py-3 border-b border-zinc-100 flex items-center justify-between">
+                  <h3 className="font-bold text-zinc-800 uppercase tracking-wider text-xs">{phaseName}</h3>
+                  <span className="text-[11px] font-bold text-zinc-400">{list.length} partidas</span>
+                </div>
+                {/* Column header: same grid as the rows below, so every column lines up. */}
+                <div
+                  className={`px-5 py-2 border-b border-zinc-100 text-[10px] font-black uppercase tracking-wide text-zinc-400 ${columns}`}
+                >
+                  <span className="pl-1.5">Descripción</span>
+                  <span className="text-center">Ud</span>
+                  <span className="text-right whitespace-nowrap pr-3">Precio (€)</span>
+                  <span />
+                  {withMarket && <span className="hidden md:block text-right whitespace-nowrap">Mercado</span>}
+                </div>
+                <div className="divide-y divide-zinc-50">
+                  {list.map((service) => (
+                    <div
+                      key={service.id}
+                      className={`px-5 py-3 hover:bg-zinc-50/60 transition ${columns}`}
+                    >
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           {service.code && (
                             <span className="text-[10px] font-black text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded">
@@ -651,50 +679,53 @@ export default function CatalogPage() {
                             }
                             className="flex-1 min-w-0 font-medium text-zinc-900 text-sm bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 transition"
                           />
-                          <input
-                            defaultValue={service.unit}
-                            onBlur={(e) =>
-                              e.target.value !== service.unit && handleUpdate(service.id, { unit: e.target.value })
-                            }
-                            className="w-16 text-xs font-bold text-zinc-500 uppercase bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 rounded px-1.5 py-1 text-center transition"
-                          />
-                          <input
-                            defaultValue={service.base_price}
-                            inputMode="decimal"
-                            onBlur={(e) => {
-                              const value = Number(e.target.value.replace(',', '.'))
-                              if (!Number.isNaN(value) && value !== service.base_price) {
-                                handleUpdate(service.id, { base_price: value })
-                              }
-                            }}
-                            className="w-24 text-right font-bold text-zinc-900 tabular-nums text-sm bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 transition"
-                          />
-                          <button
-                            onClick={() => handleDelete(service)}
-                            className="p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
-                            title="Eliminar del catálogo"
-                          >
-                            <Trash2 size={16} />
-                          </button>
                         </div>
                         {service.description && (
                           <p className="text-[11px] text-zinc-400 mt-1 pl-1.5 leading-snug">{service.description}</p>
                         )}
                       </div>
-                      {service.price_min != null && service.price_max != null && (
-                        <div className="hidden md:block text-right shrink-0 pt-1">
-                          <div className="text-[10px] font-bold uppercase text-zinc-400">Mercado</div>
-                          <div className="text-[11px] font-bold text-zinc-500 tabular-nums">
-                            {eur(service.price_min)} – {eur(service.price_max)}
-                          </div>
+                      <input
+                        defaultValue={service.unit}
+                        onBlur={(e) =>
+                          e.target.value !== service.unit && handleUpdate(service.id, { unit: e.target.value })
+                        }
+                        className="w-full text-xs font-bold text-zinc-500 uppercase bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 rounded px-1.5 py-1 text-center transition"
+                      />
+                      {/* Editable number plus its currency, so the price reads like a real amount. */}
+                      <div className="flex items-center justify-end gap-1">
+                        <input
+                          defaultValue={service.base_price}
+                          inputMode="decimal"
+                          onBlur={(e) => {
+                            const value = Number(e.target.value.replace(',', '.'))
+                            if (!Number.isNaN(value) && value !== service.base_price) {
+                              handleUpdate(service.id, { base_price: value })
+                            }
+                          }}
+                          className="flex-1 min-w-0 text-right font-bold text-zinc-900 tabular-nums text-sm bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 transition"
+                        />
+                        <span className="text-[11px] font-bold text-zinc-400">€</span>
+                      </div>
+                      <button
+                        onClick={() => handleDelete(service)}
+                        className="justify-self-center p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
+                        title="Eliminar del catálogo"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                      {withMarket && (
+                        <div className="hidden md:block text-right text-[11px] font-bold text-zinc-500 tabular-nums">
+                          {service.price_min != null && service.price_max != null
+                            ? `${eur(service.price_min)} – ${eur(service.price_max)}`
+                            : ''}
                         </div>
                       )}
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
