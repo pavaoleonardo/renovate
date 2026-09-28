@@ -21,13 +21,12 @@
 *.pem
 *.md
 *.pdf
-# keep agent working rules versioned (AGENTS.md / .github/copilot-instructions.md)
-!AGENTS.md
-!.github/copilot-instructions.md
-# Product docs stay local-only (SPEC.md, README.md, docs/**): git is not their backup.
-# The durable homes are the local file, the Obsidian mirror and Engram. AGENTS.md and
-# .github/copilot-instructions.md above are the only deliberate *.md exceptions.
-# Re-check after editing: `git check-ignore -v docs/catalogo-precios.md` must match *.md.
+# Everything in markdown stays local-only (AGENTS.md, SPEC.md, README.md,
+# .github/copilot-instructions.md, docs/**): git is not their backup. The durable homes
+# are the local file, the Obsidian mirror and Engram. A fresh clone therefore carries no
+# agent rules; put AGENTS.md back deliberately with `git add -f AGENTS.md` if that ever
+# changes. The rules files keep working from disk for Cline / Copilot in the editor.
+# Re-check after editing: `git check-ignore -v AGENTS.md` must match *.md.
 
 # debug
 npm-debug.log*
