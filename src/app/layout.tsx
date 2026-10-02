@@ -33,8 +33,8 @@ export default async function RootLayout({
 
         {/* Global Nav MVP */}
         <nav className="bg-white border-b border-zinc-200 shadow-sm sticky top-0 z-40">
-          <div className="w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <Link href="/" className="font-extrabold text-xl tracking-tighter text-zinc-900">
+          <div className="w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
+            <Link href="/" className="font-extrabold text-xl tracking-tighter text-zinc-900 shrink-0">
               RENOVATE<span className="text-blue-600">.</span>
             </Link>
             
@@ -49,8 +49,9 @@ export default async function RootLayout({
             <div className="flex items-center gap-4">
               {user ? (
                 <form action={signOut}>
-                  <button className="text-xs font-bold text-zinc-500 hover:text-red-600 border border-zinc-200 bg-white px-3 py-1.5 rounded-lg shadow-sm transition">
-                    Cerrar Sesión ({user.email})
+                  <button className="text-xs font-bold text-zinc-500 hover:text-red-600 border border-zinc-200 bg-white px-3 py-1.5 rounded-lg shadow-sm transition whitespace-nowrap">
+                    <span className="hidden sm:inline">Cerrar Sesión ({user.email})</span>
+                    <span className="sm:hidden">Salir</span>
                   </button>
                 </form>
               ) : (
@@ -60,6 +61,17 @@ export default async function RootLayout({
               )}
             </div>
           </div>
+
+          {/* Mobile nav: the section links get their own row so the top bar stays on one line. */}
+          {user && (
+            <div className="md:hidden border-t border-zinc-100">
+              <div className="px-4 h-11 flex items-center gap-6 text-sm font-bold text-zinc-500 overflow-x-auto">
+                <Link href="/estimates" className="hover:text-zinc-900 transition whitespace-nowrap">Presupuestos</Link>
+                <Link href="/catalog" className="hover:text-zinc-900 transition whitespace-nowrap">Catálogo</Link>
+                <Link href="/settings" className="hover:text-zinc-900 transition whitespace-nowrap">Ajustes</Link>
+              </div>
+            </div>
+          )}
         </nav>
 
         {children}

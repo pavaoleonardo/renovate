@@ -268,7 +268,7 @@ export default function EstimateEditor({
 
   return (
     <>
-      <div className="no-print-area max-w-shell mx-auto py-10 px-4 sm:px-6 lg:px-8 min-h-screen pb-40">
+      <div className="no-print-area max-w-shell mx-auto py-10 px-4 sm:px-6 lg:px-8 min-h-screen pb-48 md:pb-40">
         
         {/* HEADER ... rest of editor ... */}
         {/* (I'll keep the same structure but ensuring the no-print-area div closes before the modal) */}
@@ -387,6 +387,10 @@ export default function EstimateEditor({
             </div>
           ) : (
             <>
+          {/* Phones are narrower than the 8 editor columns: scroll the rows
+              sideways instead of letting them clip inside the card. */}
+          <div className="overflow-x-auto">
+          <div className="min-w-[768px]">
           <div className="grid grid-cols-[30px_1fr_120px_60px_100px_80px_100px_30px] gap-3 p-3 bg-zinc-50/80 border-b border-zinc-100 text-[10px] font-bold text-zinc-400 uppercase tracking-widest items-center">
             <div></div>
             <div>Descripción</div>
@@ -540,6 +544,8 @@ export default function EstimateEditor({
               );
             })}
           </div>
+          </div>
+          </div>
 
           {/* Quick Add Buttons */}
           <div className="p-4 bg-zinc-50 border-t border-zinc-100 flex gap-3 items-center flex-wrap">
@@ -579,34 +585,34 @@ export default function EstimateEditor({
         </div>
 
         {/* STICKY ACTION BAR */}
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-shell bg-white border border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-4 px-6 md:px-8 flex justify-between items-center rounded-2xl z-50 print:hidden">
-          <div>
+        <div className="fixed bottom-4 md:bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-shell bg-white border border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-3 px-4 md:p-4 md:px-8 flex flex-col md:flex-row md:justify-between md:items-center gap-3 rounded-2xl z-50 print:hidden">
+          <div className="w-full md:w-auto">
             <button 
               onClick={handleSave} 
               disabled={isSaving}
-              className="flex items-center gap-2 bg-zinc-900 hover:bg-black active:bg-zinc-800 text-white px-8 py-3 rounded-xl font-bold transition shadow-md disabled:opacity-50"
+              className="w-full md:w-auto flex items-center justify-center gap-2 bg-zinc-900 hover:bg-black active:bg-zinc-800 text-white px-8 py-3 rounded-xl font-bold transition shadow-md disabled:opacity-50"
             >
              {isSaving ? 'Guardando...' : 'Guardar Presupuesto'}
             </button>
           </div>
-          <div className="text-right flex items-center gap-8">
+          <div className="flex w-full md:w-auto items-center justify-between md:justify-end gap-4 md:gap-8">
             <div className="hidden md:block text-zinc-500 text-sm font-bold">Líneas: {rows?.length || 0}</div>
-            <div className="flex gap-8">
+            <div className="flex flex-1 md:flex-none justify-between md:justify-end gap-4 md:gap-8">
               <div className="text-right">
                 <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">Subtotal</div>
-                <div className="text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
+                <div className="text-base md:text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
                   {totals.subtotal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                 </div>
               </div>
               <div className="text-right">
                 <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">{taxLabel(totals.taxRate)}</div>
-                <div className="text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
+                <div className="text-base md:text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
                   {totals.tax.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                 </div>
               </div>
               <div className="text-right">
                 <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">{totals.taxRate > 0 ? 'Total (con IVA)' : 'Total (sin IVA)'}</div>
-                <div className="text-3xl font-black text-blue-600 tabular-nums tracking-tight">
+                <div className="text-2xl md:text-3xl font-black text-blue-600 tabular-nums tracking-tight">
                   {totals.total.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                 </div>
               </div>

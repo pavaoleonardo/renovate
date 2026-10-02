@@ -95,7 +95,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <div className="bg-white p-8 rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 space-y-6">
+      <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 space-y-6">
         
         <div className="flex flex-col sm:flex-row gap-6 items-start">
           <div className="shrink-0 w-32 h-32 bg-zinc-50 border-2 border-dashed border-zinc-200 rounded-2xl flex items-center justify-center overflow-hidden relative group">

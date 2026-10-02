@@ -90,17 +90,17 @@ export default async function EstimatesList() {
             type="text" 
             name="clientName" 
             placeholder="Cliente..." 
-            className="px-3 py-2 bg-zinc-50 border-transparent rounded-lg text-sm focus:ring-2 focus:ring-blue-100 outline-none font-medium text-zinc-900 min-w-[120px]" 
+            className="flex-1 min-w-0 px-3 py-2 bg-zinc-50 border-transparent rounded-lg text-sm focus:ring-2 focus:ring-blue-100 outline-none font-medium text-zinc-900" 
             required
           />
           <input 
             type="text" 
             name="propertyAddress" 
             placeholder="Dirección obra..." 
-            className="px-3 py-2 bg-zinc-50 border-transparent rounded-lg text-sm focus:ring-2 focus:ring-blue-100 outline-none font-medium text-zinc-900 min-w-[140px]" 
+            className="flex-1 min-w-0 px-3 py-2 bg-zinc-50 border-transparent rounded-lg text-sm focus:ring-2 focus:ring-blue-100 outline-none font-medium text-zinc-900" 
             required
           />
-          <button type="submit" className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-5 py-2.5 rounded-lg font-bold shadow transition flex items-center gap-2 whitespace-nowrap">
+          <button type="submit" className="shrink-0 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-5 py-2.5 rounded-lg font-bold shadow transition flex items-center gap-2 whitespace-nowrap">
             <span className="text-xl leading-none mb-0.5">+</span> Nuevo
           </button>
         </form>
