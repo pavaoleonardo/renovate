@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { AI_RATE_LIMIT_MESSAGE, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai';
 
-const RATE_LIMIT = 10;
-const WINDOW_MINUTES = 60;
+const AI_ENDPOINT = 'translate-for-client';
 
 export async function POST(req: NextRequest) {
   const supabase = createClient();
@@ -24,30 +24,17 @@ export async function POST(req: NextRequest) {
   }
 
   const companyId = userRecord.company_id;
-  const endpoint = 'translate-for-client';
-  const windowStart = new Date(Date.now() - WINDOW_MINUTES * 60 * 1000).toISOString();
 
   // ── 2. Rate limit check ────────────────────────────────────────
-  const { count } = await supabase
-    .from('ai_rate_limits')
-    .select('*', { count: 'exact', head: true })
-    .eq('company_id', companyId)
-    .eq('endpoint', endpoint)
-    .gte('called_at', windowStart);
-
-  if ((count ?? 0) >= RATE_LIMIT) {
-    return NextResponse.json(
-      { error: `Límite alcanzado: máximo ${RATE_LIMIT} usos por hora. Inténtalo más tarde.` },
-      { status: 429 }
-    );
+  if (await aiRateLimitReached(supabase, companyId, AI_ENDPOINT)) {
+    return NextResponse.json({ error: AI_RATE_LIMIT_MESSAGE }, { status: 429 });
   }
 
   // ── 3. Record this call ────────────────────────────────────────
-  await supabase.from('ai_rate_limits').insert({ company_id: companyId, endpoint });
+  await recordAiCall(supabase, companyId, AI_ENDPOINT);
 
   // ── 4. OpenAI call ─────────────────────────────────────────────
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
+  if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json({ error: 'OpenAI API key not configured' }, { status: 500 });
   }
 
@@ -71,32 +58,11 @@ Devuelve ÚNICAMENTE un JSON con el formato: { "id_del_servicio": "descripción 
 Servicios:
 ${serviceList}`;
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      response_format: { type: 'json_object' },
-      temperature: 0.5,
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    return NextResponse.json({ error: err }, { status: 500 });
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content || '{}';
-
   try {
-    const notes = JSON.parse(content);
+    const notes = await askOpenAiJson<Record<string, string>>(prompt, 0.5);
     return NextResponse.json({ notes });
-  } catch {
-    return NextResponse.json({ error: 'Failed to parse AI response' }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'AI request failed';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -688,6 +688,8 @@ export async function processExcelUpload(formData: FormData) {
 
     // Replace by default (wipes the company's catalog first); 'merge' appends
     const mode = (formData.get('mode') as string) === 'merge' ? 'merge' : 'replace'
+    // La ayuda de la IA es opcional y se paga: sólo se usa si el usuario la pide.
+    const useAI = formData.get('useAI') === '1'
 
     if (mode === 'replace') {
       try {
@@ -699,7 +701,7 @@ export async function processExcelUpload(formData: FormData) {
 
     let summary: ImportSummary
     try {
-      summary = await addPhaseAndServices(newPhases, phaseServicesMap)
+      summary = await addPhaseAndServices(newPhases, phaseServicesMap, { useAI })
     } catch (err) {
       console.error('Error addPhaseAndServices:', err)
       const msg = err instanceof Error ? err.message : 'Desconocido'
@@ -711,8 +713,14 @@ export async function processExcelUpload(formData: FormData) {
     const parts = [`${summary.servicesCreated} partidas nuevas`]
     if (summary.phasesReused > 0) parts.push(`fusionadas en ${summary.phasesReused} secciones que ya tenías`)
     if (summary.phasesCreated > 0) parts.push(`${summary.phasesCreated} secciones nuevas`)
-    if (summary.servicesSkipped > 0) parts.push(`${summary.servicesSkipped} que ya existían, sin duplicar`)
+    if (summary.servicesUpdated > 0) parts.push(`${summary.servicesUpdated} con el precio corregido por el documento`)
+    if (summary.servicesSkipped > 0) parts.push(`${summary.servicesSkipped} que ya existían, con el mismo precio`)
     if (summary.servicesWithBand > 0) parts.push(`${summary.servicesWithBand} con banda de mercado`)
+    if (summary.aiAttempted) {
+      if (summary.aiUnavailable) parts.push('la IA no estaba disponible, así que se importó sin ella')
+      else if (summary.aiAssisted > 0) parts.push(`${summary.aiAssisted} secciones fusionadas por IA`)
+      else parts.push('la IA revisó las secciones nuevas y no encontró ninguna que fusionar')
+    }
 
     return { success: true, message: `Importación completada: ${parts.join(' · ')}.` }
   } catch (error: Error | unknown) {

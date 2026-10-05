@@ -2,7 +2,9 @@
 
 import { Estimate, EstimateRow, CatalogService, CatalogPhase, CompanyProfile, LabourCategory, PriceSourceKind } from '@/types';
 import { DEFAULT_CATALOG } from '@/lib/default-catalog';
+import { aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai';
 import { catalogKey } from '@/lib/catalog-key';
+import { parseSectionMatches, priceChanged, sectionMatchPrompt, unmatchedSections } from '@/lib/catalog-import';
 import { findMarketBand, matchPhaseName } from '@/lib/catalog-match';
 import { catalogErrorMessage } from '@/lib/catalog-errors';
 import { computeTotals, normalizeTaxRate } from '@/lib/estimate-totals';
@@ -302,8 +304,23 @@ export interface ImportSummary {
   phasesCreated: number
   phasesReused: number
   servicesCreated: number
+  /** Partidas que ya estaban y cuyo precio ha corregido el documento. */
+  servicesUpdated: number
   servicesSkipped: number
   servicesWithBand: number
+  /** La IA llegó a intentar el emparejado de secciones (sólo si se pidió). */
+  aiAttempted: boolean
+  /** Se pidió ayuda a la IA y no estaba disponible: la importación siguió igual. */
+  aiUnavailable: boolean
+  /** Secciones que la IA emparejó con una que ya existía. */
+  aiAssisted: number
+}
+
+/** Una partida que ya está en el catálogo, con lo justo para decidir si hay que tocarla. */
+interface ExistingCatalogService {
+  /** `null` cuando la fila acaba de insertarse en esta misma importación. */
+  id: string | null
+  base_price: number | null
 }
 
 /**
@@ -312,24 +329,35 @@ export interface ImportSummary {
  * Es una FUSIÓN, nunca un insert ciego: una sección cuyo nombre se parece a una que
  * la empresa ya tiene —sin contar acentos ni mayúsculas, y dando por válido que un
  * nombre esté contenido en otro— recibe las partidas importadas en vez de
- * duplicarse. Las partidas que ya están en esa sección se saltan, así que importar
- * dos veces el mismo documento no cambia nada.
+ * duplicarse. Las partidas que ya están en esa sección no se duplican; si el
+ * documento trae un precio distinto para una de ellas, ese precio es una corrección
+ * y se aplica (`servicesUpdated`).
  *
  * Cada línea cuyo nombre coincide con una partida del catálogo por defecto se
  * guarda con la banda de mercado de esa partida (`price_min` / `price_max`). La
  * banda es una referencia nuestra: el precio es el del documento y por eso no se le
  * atribuye ninguna base (`price_source` queda vacío).
+ *
+ * Con `options.useAI` y alguna sección que no encaje con ninguna existente, se pide
+ * UNA vez a la IA que diga con cuál debería fusionarse cada una. La IA nunca puede
+ * inventar una sección: su respuesta se valida contra las que ya existen y, si falla,
+ * la importación sigue sin ella.
  */
 export async function addPhaseAndServices(
   phases: Omit<CatalogPhase, 'id'>[],
-  phaseServicesMap: Record<number, Omit<CatalogService, 'id' | 'phase_id'>[]>
+  phaseServicesMap: Record<number, Omit<CatalogService, 'id' | 'phase_id'>[]>,
+  options: { useAI?: boolean } = {}
 ): Promise<ImportSummary> {
   const summary: ImportSummary = {
     phasesCreated: 0,
     phasesReused: 0,
     servicesCreated: 0,
+    servicesUpdated: 0,
     servicesSkipped: 0,
-    servicesWithBand: 0
+    servicesWithBand: 0,
+    aiAttempted: false,
+    aiUnavailable: false,
+    aiAssisted: 0
   }
 
   const supabase = createClient();
@@ -359,18 +387,44 @@ export async function addPhaseAndServices(
     phaseIdByKey.set(catalogKey(String(p.name)), String(p.id));
   }
 
-  // Partidas que ya existen, para no duplicarlas al reimportar.
-  const takenInPhase = new Set<string>();
-  const takenCodes = new Set<string>();
+  // Partidas que ya existen. No se duplican, pero tampoco se ignoran: si el documento
+  // trae otro precio para una que ya está, es una corrección y se aplica.
+  const existingBySlot = new Map<string, ExistingCatalogService>();
+  const existingByCode = new Map<string, ExistingCatalogService>();
   const phaseIds = (existingPhases ?? []).map((p: { id: string }) => String(p.id));
   if (phaseIds.length > 0) {
     const { data: existingServices } = await supabase
       .from('catalog_services')
-      .select('code, name, phase_id')
+      .select('id, code, name, phase_id, base_price')
       .in('phase_id', phaseIds);
     for (const row of existingServices ?? []) {
-      takenInPhase.add(`${row.phase_id}:${catalogKey(String(row.name))}`);
-      if (row.code) takenCodes.add(catalogKey(String(row.code)));
+      const entry: ExistingCatalogService = {
+        id: String(row.id),
+        base_price: row.base_price === null || row.base_price === undefined ? null : Number(row.base_price)
+      };
+      existingBySlot.set(`${row.phase_id}:${catalogKey(String(row.name))}`, entry);
+      if (row.code) existingByCode.set(catalogKey(String(row.code)), entry);
+    }
+  }
+
+  // ── Emparejado por IA (opcional y de pago) ───────────────────────────────────
+  // Sólo si el usuario lo pide, y sólo cuando hay secciones que no encajan con
+  // ninguna de las suyas: si no hay nada que preguntar no se gasta ninguna llamada.
+  const aiMatchByKey = new Map<string, string>();
+  if (options.useAI && existingNames.length > 0) {
+    const unmatched = unmatchedSections(phases.map((phase) => phase.name), existingNames);
+
+    if (unmatched.length > 0) {
+      summary.aiAttempted = true;
+      const matched = await matchSectionsWithAI(supabase, companyId, unmatched, existingNames);
+      if (matched) {
+        matched.forEach((existingName, incomingName) => {
+          aiMatchByKey.set(catalogKey(incomingName), existingName);
+        });
+        summary.aiAssisted = aiMatchByKey.size;
+      } else {
+        summary.aiUnavailable = true;
+      }
     }
   }
 
@@ -378,7 +432,10 @@ export async function addPhaseAndServices(
 
   for (let i = 0; i < phases.length; i++) {
     const incomingName = phases[i].name;
-    const matchedName = matchPhaseName(incomingName, existingNames);
+    let matchedName = matchPhaseName(incomingName, existingNames);
+    // La IA sólo aporta cuando lo determinista no encontró nada, y nunca puede
+    // inventarse una sección: su respuesta se validó contra las que ya existen.
+    if (!matchedName) matchedName = aiMatchByKey.get(catalogKey(incomingName)) ?? null;
     let phaseId: string | null = matchedName ? (phaseIdByKey.get(catalogKey(matchedName)) ?? null) : null;
 
     if (phaseId) {
@@ -408,14 +465,22 @@ export async function addPhaseAndServices(
         summary.servicesSkipped++;
         continue;
       }
-      if (takenInPhase.has(`${phaseId}:${nameKey}`)) {
-        summary.servicesSkipped++;
-        continue;
-      }
 
       const code = (service as { code?: string | null }).code ?? null;
-      if (code && takenCodes.has(catalogKey(code))) {
-        summary.servicesSkipped++;
+      const duplicate =
+        existingBySlot.get(`${phaseId}:${nameKey}`) ??
+        (code ? existingByCode.get(catalogKey(code)) : undefined);
+
+      if (duplicate) {
+        // Ya está en el catálogo: la fila se queda donde está y sólo se corrige el
+        // precio, y sólo cuando el documento trae otro distinto.
+        const incomingPrice = Number(service.base_price);
+        if (duplicate.id && Number.isFinite(incomingPrice) && priceChanged(duplicate.base_price, incomingPrice)) {
+          if (await updateServicePrice(supabase, duplicate.id, incomingPrice)) summary.servicesUpdated++;
+          else summary.servicesSkipped++;
+        } else {
+          summary.servicesSkipped++;
+        }
         continue;
       }
 
@@ -456,9 +521,12 @@ export async function addPhaseAndServices(
 
     if (error) throw new Error(catalogErrorMessage(error.message));
 
+    // Sin id: lo que acaba de insertarse no puede volver a actualizarse en esta misma
+    // importación, pero sí cuenta como duplicado si el documento repite la línea.
     for (const row of stored) {
-      takenInPhase.add(`${row.phase_id}:${catalogKey(String(row.name))}`);
-      if (row.code) takenCodes.add(catalogKey(String(row.code)));
+      const entry: ExistingCatalogService = { id: null, base_price: null };
+      existingBySlot.set(`${row.phase_id}:${catalogKey(String(row.name))}`, entry);
+      if (row.code) existingByCode.set(catalogKey(String(row.code)), entry);
     }
 
     summary.servicesCreated += stored.length;
@@ -466,6 +534,72 @@ export async function addPhaseAndServices(
   }
 
   return summary;
+}
+
+/**
+ * Corrige el precio de una partida que ya existía, porque el documento trae otro.
+ *
+ * Ese precio es el del documento, así que la fila ya no puede seguir reclamando la
+ * base que traía: `price_source` y `price_reviewed_at` vuelven a null. Una etiqueta
+ * que describe un precio que ya no está es peor que ninguna etiqueta.
+ *
+ * El alcance es la propia fila (su sección ya se buscó por `company_id`). Si el
+ * entorno todavía no tiene la migración de procedencia, se reintenta sólo con el
+ * precio: una columna que falta no debe impedir la corrección.
+ */
+async function updateServicePrice(
+  supabase: ReturnType<typeof createClient>,
+  id: string,
+  basePrice: number
+): Promise<boolean> {
+  const withProvenance = await supabase
+    .from('catalog_services')
+    .update({ base_price: basePrice, price_source: null, price_reviewed_at: null })
+    .eq('id', id);
+  if (!withProvenance.error) return true;
+
+  const priceOnly = await supabase
+    .from('catalog_services')
+    .update({ base_price: basePrice })
+    .eq('id', id);
+  return !priceOnly.error;
+}
+
+/** Contador propio para la IA de las importaciones: no compite con la nota del PDF. */
+const IMPORT_AI_ENDPOINT = 'catalog-import-assist';
+
+/**
+ * Pide a la IA que empareje secciones que no encajan con ninguna existente, en UNA
+ * sola llamada por importación.
+ *
+ * Devuelve «nombre importado → nombre existente» ya validado contra las secciones
+ * reales de la empresa: cualquier nombre que la IA se invente se descarta, así que la
+ * IA no puede crear ni renombrar nada, sólo proponer una fusión.
+ *
+ * Devuelve `null` cuando la IA no está disponible (sin clave, límite agotado o
+ * respuesta ilegible): una importación nunca debe caerse porque falle la IA.
+ */
+async function matchSectionsWithAI(
+  supabase: ReturnType<typeof createClient>,
+  companyId: string,
+  unmatched: string[],
+  existingNames: string[]
+): Promise<Map<string, string> | null> {
+  try {
+    if (await aiRateLimitReached(supabase, companyId, IMPORT_AI_ENDPOINT)) return null;
+    await recordAiCall(supabase, companyId, IMPORT_AI_ENDPOINT);
+
+    // Temperatura baja: esto es una decisión de clasificación, no redacción.
+    const answer = await askOpenAiJson<Record<string, unknown>>(
+      sectionMatchPrompt(unmatched, existingNames),
+      0.1
+    );
+
+    return parseSectionMatches(answer, unmatched, existingNames);
+  } catch (error) {
+    console.error('Error emparejando secciones con IA:', error);
+    return null;
+  }
 }
 
 /**

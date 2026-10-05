@@ -113,6 +113,8 @@ export default function CatalogPage() {
   const [busy, setBusy] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [importMode, setImportMode] = useState<'replace' | 'merge'>('replace')
+  /** Opt-in paid help: ask the AI where an imported section that matches nothing should go. */
+  const [useAi, setUseAi] = useState(false)
   const [result, setResult] = useState<{ success: boolean; text: string } | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [query, setQuery] = useState('')
@@ -232,6 +234,7 @@ export default function CatalogPage() {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('mode', importMode)
+    if (useAi) formData.append('useAI', '1')
     if (priceCol !== null) formData.append('priceCol', String(priceCol))
     if (noPrices) formData.append('noPrices', '1')
 
@@ -571,6 +574,17 @@ export default function CatalogPage() {
               <input type="radio" checked={importMode === 'merge'} onChange={() => setImportMode('merge')} />
               Añadir a lo que ya tengo
             </label>
+            {importMode === 'merge' && (
+              <label className="flex items-center gap-2 font-medium text-zinc-700">
+                <input
+                  type="checkbox"
+                  checked={useAi}
+                  onChange={(e) => setUseAi(e.target.checked)}
+                  disabled={busy}
+                />
+                Usar IA con las secciones que no encajen (1 llamada)
+              </label>
+            )}
           </div>
           {preview && (
             <div className="rounded-xl border border-zinc-200 overflow-hidden">
