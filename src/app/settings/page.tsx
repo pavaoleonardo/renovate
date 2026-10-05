@@ -51,7 +51,17 @@ export default function SettingsPage() {
 
     const fileExt = file.name.split('.').pop()
     const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`
-    const filePath = `${fileName}`
+
+    // El logo vive bajo la carpeta de su empresa: es exactamente lo que comprueba la
+    // política de storage (logos_insert_own_folder). En la raíz del bucket, cualquier
+    // empresa podría sobrescribirlo.
+    if (!profile.id) {
+      console.error('No company id available, cannot place the logo in its folder')
+      alert('Error al subir el logo. Inténtalo de nuevo.')
+      setUploading(false)
+      return
+    }
+    const filePath = `${profile.id}/${fileName}`
 
     const { error: uploadError } = await supabase.storage
       .from('logos')
