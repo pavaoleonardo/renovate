@@ -322,10 +322,12 @@ export interface ImportSummary {
   servicesMergedSimilar: number
   /** Partidas que llegaron sin precio y se han guardado con la estimación de la banda. */
   servicesEstimated: number
-  /** La IA llegó a intentar el emparejado de secciones (sólo si se pidió). */
+  /** Se pidió ayuda a la IA para las secciones que no encajaban (si había alguna). */
   aiAttempted: boolean
-  /** Se pidió ayuda a la IA y no estaba disponible: la importación siguió igual. */
+  /** La IA no estaba disponible: la importación siguió igual, sin emparejar secciones. */
   aiUnavailable: boolean
+  /** La empresa ya gastó su ventana de llamadas de IA y no se pudo preguntar. */
+  aiRateLimited: boolean
   /** Secciones que la IA emparejó con una que ya existía. */
   aiAssisted: number
 }
@@ -334,8 +336,6 @@ export interface ImportSummary {
 export type ImportDecision = 'merge' | 'new'
 
 export interface ImportOptions {
-  /** Ayuda de pago para las secciones que no encajan con ninguna existente. */
-  useAI?: boolean
   /** Respuestas del usuario (o de la IA) para las líneas dudosas, por clave de línea. */
   decisions?: Record<string, ImportDecision>
   /**
@@ -387,6 +387,7 @@ export async function addPhaseAndServices(
     servicesEstimated: 0,
     aiAttempted: false,
     aiUnavailable: false,
+    aiRateLimited: false,
     aiAssisted: 0
   }
 
@@ -445,23 +446,29 @@ export async function addPhaseAndServices(
     }
   }
 
-  // ── Emparejado por IA (opcional y de pago) ───────────────────────────────────
-  // Sólo si el usuario lo pide, y sólo cuando hay secciones que no encajan con
-  // ninguna de las suyas: si no hay nada que preguntar no se gasta ninguna llamada.
+  // ── Emparejado por IA (de pago, automático y acotado) ────────────────────────
+  // La IA no es un botón que el usuario deba acordarse de pulsar: se usa sola para lo
+  // que el emparejado determinista no supo resolver, que es exactamente lo que devuelve
+  // `unmatchedSections`. Si no queda ninguna sección dudosa no hay llamada que pagar, y
+  // el contador de `ai_rate_limits` (10 usos por hora y empresa) es el techo del gasto:
+  // agotado, la importación sigue igual y el resumen lo dice.
   const aiMatchByKey = new Map<string, string>();
-  if (options.useAI && existingNames.length > 0) {
+  if (existingNames.length > 0) {
     const unmatched = unmatchedSections(phases.map((phase) => phase.name), existingNames);
 
     if (unmatched.length > 0) {
       summary.aiAttempted = true;
-      const matched = await matchSectionsWithAI(supabase, companyId, unmatched, existingNames);
-      if (matched) {
-        matched.forEach((existingName, incomingName) => {
+      const ai = await matchSectionsWithAI(supabase, companyId, unmatched, existingNames);
+
+      if (ai.status === 'rate-limited') {
+        summary.aiRateLimited = true;
+      } else if (ai.status === 'error') {
+        summary.aiUnavailable = true;
+      } else {
+        ai.matches.forEach((existingName, incomingName) => {
           aiMatchByKey.set(catalogKey(incomingName), existingName);
         });
         summary.aiAssisted = aiMatchByKey.size;
-      } else {
-        summary.aiUnavailable = true;
       }
     }
   }
@@ -652,14 +659,24 @@ async function updateServicePrice(
  * Devuelve `null` cuando la IA no está disponible (sin clave, límite agotado o
  * respuesta ilegible): una importación nunca debe caerse porque falle la IA.
  */
+/** Respuesta de la IA al emparejado de secciones, con el motivo cuando no hay respuesta. */
+interface AiSectionMatches {
+  status: 'ok' | 'rate-limited' | 'error'
+  matches: Map<string, string>
+}
+
 async function matchSectionsWithAI(
   supabase: ReturnType<typeof createClient>,
   companyId: string,
   unmatched: string[],
   existingNames: string[]
-): Promise<Map<string, string> | null> {
+): Promise<AiSectionMatches> {
   try {
-    if (await aiRateLimitReached(supabase, companyId, IMPORT_AI_ENDPOINT)) return null;
+    // El contador se comprueba (y se cobra) antes de llamar: `rate-limited` se distingue
+    // de `error` porque el mensaje que ve el usuario es distinto.
+    if (await aiRateLimitReached(supabase, companyId, IMPORT_AI_ENDPOINT)) {
+      return { status: 'rate-limited', matches: new Map() };
+    }
     await recordAiCall(supabase, companyId, IMPORT_AI_ENDPOINT);
 
     // Temperatura baja: esto es una decisión de clasificación, no redacción.
@@ -668,10 +685,10 @@ async function matchSectionsWithAI(
       0.1
     );
 
-    return parseSectionMatches(answer, unmatched, existingNames);
+    return { status: 'ok', matches: parseSectionMatches(answer, unmatched, existingNames) };
   } catch (error) {
     console.error('Error emparejando secciones con IA:', error);
-    return null;
+    return { status: 'error', matches: new Map() };
   }
 }
 

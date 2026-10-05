@@ -136,6 +136,18 @@ export interface ExcelPreviewSheet {
 export type ImportMatchStatus = 'exact' | 'auto' | 'similar' | 'new';
 
 /**
+ * What the AI proposed for one doubtful line: the partida of the company's own
+ * catalog it should merge into. It is only a proposal — the review panel shows it
+ * marked and the user can change it before confirming.
+ */
+export interface ImportMatchSuggestion {
+  /** Stable key of the line (`importLineKey`). */
+  key: string;
+  targetId: string;
+  targetName: string;
+}
+
+/**
  * What the importer proposes for one line of the document, so the review panel on
  * /catalog can show it and the user can change it before anything is saved.
  */
@@ -184,6 +196,18 @@ export interface ExcelPreview {
   headerRow: number | null;
   /** What the importer proposes for each line (merge / ask / create). */
   matches: ExcelPreviewMatch[];
+  /**
+   * Qué se hace con cada sección del documento: la que se fusiona con una que ya
+   * existe (con qué nombre) y la que se creará nueva. `mergesInto: null` significa que
+   * el emparejado determinista no encontró nada y que decidirá la IA al confirmar.
+   */
+  sections: { name: string; mergesInto: string | null }[];
+  /**
+   * Propuesta de la IA para las líneas dudosas, pedida en el mismo análisis (una sola
+   * llamada, automática). `null` cuando no había nada dudoso o cuando el documento se
+   * volvió a analizar con otros ajustes.
+   */
+  ai: { suggestions: ImportMatchSuggestion[]; note: string } | null;
   /** Partidas the company already has in this catalog, the pool the lines match against. */
   existingServices: number;
   totals: {

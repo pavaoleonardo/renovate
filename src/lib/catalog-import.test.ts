@@ -134,6 +134,17 @@ describe('unmatchedSections', () => {
       )
     ).toEqual(['Climatización'])
   })
+
+  it('un título numerado no se pregunta a la IA si ya encaja con una sección', () => {
+    // Lo que hace barata la ayuda automática: lo que la regla determinista resuelve no
+    // se manda a OpenAI.
+    expect(
+      unmatchedSections(
+        ['Fase 1: Demoliciones', 'Fase 6: Pintura.', 'Fase 12: Reformas varias'],
+        ['Demoliciones y Trabajos Previos', 'Pintura y Acabados']
+      )
+    ).toEqual(['Fase 12: Reformas varias'])
+  })
 })
 
 

@@ -70,6 +70,113 @@ const STOPWORD_MAX_LENGTH = 2
 const tokenSet = (key: string) =>
   new Set(key.split(' ').filter((token) => token.length > STOPWORD_MAX_LENGTH))
 
+/**
+ * Palabras con las que un presupuesto anuncia un título, no una sección: «Fase 1:
+ * Demoliciones» y «Demoliciones» son la misma sección. Los documentos reales casi
+ * nunca titulan sus capítulos como el catálogo por defecto, así que este ruido se
+ * quita antes de comparar.
+ */
+const SECTION_HEADING =
+  /^\s*(fase|cap[ií]tulo|secci[óo]n|apartado|bloque|grupo|tajo|zona|actuaci[óo]n|conjunto|unidad(?:es)? de obra)s?\b[\s.:\-–]*/i
+
+/** «1. », «2) », «3-»: la numeración del capítulo, que tampoco distingue una sección. */
+const SECTION_NUMBERING = /^\s*\d{1,2}\s*[.):\-–]\s*/
+
+/**
+ * Palabras que no distinguen una sección: que lo único que compartan dos nombres sea
+ * «trabajos», «varios» o «instalaciones» no es motivo para fusionarlos.
+ */
+const GENERIC_SECTION_TOKENS = new Set([
+  'trabajo',
+  'trabajos',
+  'vario',
+  'varios',
+  'varia',
+  'varias',
+  'otro',
+  'otros',
+  'otra',
+  'otras',
+  'general',
+  'generales',
+  'obra',
+  'obras',
+  'reforma',
+  'reformas',
+  'actuacion',
+  'actuaciones',
+  'instalacion',
+  'instalaciones',
+  'vivienda',
+  'viviendas',
+  'local',
+  'locales'
+])
+
+/**
+ * El nombre de una sección sin el ruido de su título («Capítulo 1. Demoliciones» →
+ * «demoliciones»). Dos pasadas porque un título puede encadenar las dos cosas.
+ */
+export function sectionKey(value: string): string {
+  let key = value
+  for (let i = 0; i < 2; i++) key = key.replace(SECTION_HEADING, '').replace(SECTION_NUMBERING, '')
+  return catalogKey(key)
+}
+
+/**
+ * Palabras significativas de una sección, en singular y sin las que no distinguen.
+ *
+ * El plural importa: «Aislamiento» y «Pladur, Techos y Aislamientos» son la misma
+ * sección aunque el documento escriba una en plural. Se guardan las dos formas en
+ * lugar de elegir una, que es lo que hace que «aislamientos» y «aislamiento» se
+ * encuentren sin inventar un lematizador.
+ */
+function sectionTokens(value: string): Set<string> {
+  const tokens = new Set<string>()
+  sectionKey(value)
+    .split(' ')
+    .forEach((token) => {
+      if (token.length <= STOPWORD_MAX_LENGTH) return
+      tokens.add(token)
+      if (/ones$/.test(token)) tokens.add(token.replace(/ones$/, 'on'))
+      else if (/s$/.test(token) && token.length > STOPWORD_MAX_LENGTH + 2) tokens.add(token.slice(0, -1))
+    })
+  return tokens
+}
+
+/**
+ * Con qué fracción de las palabras del nombre más corto hay que quedarse para dar dos
+ * secciones por la misma.
+ *
+ * «Demoliciones» (1 palabra) frente a «Demoliciones y Trabajos Previos» (3) comparte
+ * 1 de 1 = 1,0 → se fusionan. «Instalación de fontanería y climatización» frente a
+ * «Fontanería, saneamiento y calefacción» comparte 1 de 3 = 0,33 → no se fusionan
+ * solas, y ahí es justo donde debe decidir la persona (o la IA): la sección del
+ * documento cubre dos capítulos del catálogo.
+ */
+export const SECTION_COVERAGE = 0.5
+
+/**
+ * Cómo de bien cubre una sección a la otra por sus palabras. `0` cuando lo único que
+ * comparten son palabras que no distinguen nada.
+ */
+function sectionCoverage(a: string, b: string): number {
+  const tokensA = sectionTokens(a)
+  const tokensB = sectionTokens(b)
+  if (tokensA.size === 0 || tokensB.size === 0) return 0
+
+  let shared = 0
+  let distinctive = false
+  tokensA.forEach((token) => {
+    if (!tokensB.has(token)) return
+    shared++
+    if (!GENERIC_SECTION_TOKENS.has(token)) distinctive = true
+  })
+
+  if (!distinctive) return 0
+  return shared / Math.min(tokensA.size, tokensB.size)
+}
+
 export interface NameComparison {
   /** 0 (nada que ver) … 1 (el mismo nombre, escrito igual). */
   score: number
@@ -153,12 +260,38 @@ export function matchSimilarName(incoming: string, existing: string[]): string |
 }
 
 /**
- * Sección que ya existe y con la que se debe fusionar una importada. Es
- * determinista y gratis: una pasada de IA sólo merece la pena cuando esto devuelve
- * `null` y el usuario la pide, porque cada importación sería una llamada de pago.
+ * Sección que ya existe y con la que se debe fusionar una importada.
+ *
+ * Dos pasos, los dos deterministas y gratis:
+ *
+ * 1. La regla de siempre (`matchSimilarName`): nombre igual, uno contenido en el otro,
+ *    o bastante solape de palabras.
+ * 2. La cobertura de palabras del nombre más corto, que es lo que entiende cómo
+ *    titulan los documentos reales: «Fase 1: Demoliciones» comparte su única palabra
+ *    con «Demoliciones y Trabajos Previos», así que es la misma sección. Antes esto no
+ *    se veía (el «Fase 1:» diluía el solape) y cada importación creaba ocho secciones
+ *    nuevas al lado de las del catálogo por defecto.
+ *
+ * Una sección sin pistas suficientes —«Instalación de fontanería y climatización»,
+ * que cubre dos capítulos— devuelve `null`: ahí decide la persona o la IA, porque
+ * elegir por su cuenta sería inventarse una fusión.
  */
 export function matchPhaseName(incoming: string, existing: string[]): string | null {
-  return matchSimilarName(incoming, existing)
+  const byName = matchSimilarName(incoming, existing)
+  if (byName) return byName
+
+  // Un nombre corto se fusiona con demasiadas cosas («Obra», «Varios»): la cobertura
+  // exige el mismo mínimo que la contención de siempre.
+  if (sectionKey(incoming).length < MIN_CONTAINMENT_LENGTH) return null
+
+  let best: { name: string; score: number } | null = null
+  for (const name of existing) {
+    const score = sectionCoverage(incoming, name)
+    if (score < SECTION_COVERAGE) continue
+    if (!best || score > best.score) best = { name, score }
+  }
+
+  return best?.name ?? null
 }
 
 /**

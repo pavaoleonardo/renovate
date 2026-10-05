@@ -10,7 +10,7 @@ import {
   detectLayout,
   normalizeUnit
 } from '@/lib/import-layout'
-import { CatalogPhase, ExcelPreview, ExcelPreviewMatch } from '@/types'
+import { CatalogPhase, ExcelPreview, ExcelPreviewMatch, ImportMatchSuggestion } from '@/types'
 import { addPhaseAndServices, type ImportSummary } from '@/app/actions'
 import { catalogErrorMessage } from '@/lib/catalog-errors'
 import { MANUAL_PRICE_SOURCE, todayIsoDate } from '@/lib/price-basis'
@@ -477,6 +477,8 @@ async function loadExistingServices(): Promise<{ targets: ExistingService[]; pha
 /** What the importer proposes for every line, plus the counts the review panel shows. */
 interface MatchPlan {
   matches: ExcelPreviewMatch[]
+  /** Qué se hace con cada sección del documento (fusionarla o crearla). */
+  sections: { name: string; mergesInto: string | null }[]
   totals: {
     existingMatches: number
     similarMatches: number
@@ -495,6 +497,7 @@ interface MatchPlan {
  */
 function buildMatchPlan(parsed: ParsedDocument, existing: ExistingService[], phaseNames: string[] = []): MatchPlan {
   const matches: ExcelPreviewMatch[] = []
+  const sections: { name: string; mergesInto: string | null }[] = []
   const seen = new Set<string>()
   const totals = { existingMatches: 0, similarMatches: 0, newServices: 0, estimatedPrices: 0 }
 
@@ -502,7 +505,13 @@ function buildMatchPlan(parsed: ParsedDocument, existing: ExistingService[], pha
     // La sección con la que esta línea se va a fusionar (si ya existe) es la que manda
     // al medir el parecido de sus partidas; la clave de la línea sigue siendo la del
     // documento, que es la que el usuario vio en el panel.
-    const sectionName = matchPhaseName(phase.name, phaseNames) ?? phase.name
+    const merged = matchPhaseName(phase.name, phaseNames)
+    const sectionName = merged ?? phase.name
+    // El panel enseña qué pasa con cada sección: es la mitad del problema de una
+    // importación (una sección duplicada arruina un catálogo entero).
+    if (!sections.some((entry) => entry.name === phase.name)) {
+      sections.push({ name: phase.name, mergesInto: merged })
+    }
     for (const service of phase.services) {
       const key = importLineKey(phase.name, service.name)
       if (seen.has(key)) continue
@@ -550,7 +559,7 @@ function buildMatchPlan(parsed: ParsedDocument, existing: ExistingService[], pha
     }
   }
 
-  return { matches, totals }
+  return { matches, sections, totals }
 }
 
 /**
@@ -615,8 +624,6 @@ export async function processExcelUpload(formData: FormData) {
     // Añadir es el modo por defecto: subir un documento nunca debe borrar el catálogo
     // que la empresa se ha construido. Reemplazarlo entero es una decisión explícita.
     const mode = formData.get('mode') === 'replace' ? 'replace' : 'merge'
-    // La ayuda de la IA es opcional y se paga: sólo se usa si el usuario la pide.
-    const useAI = formData.get('useAI') === '1'
     // «Rellenar los precios que falten con la estimación de la banda de mercado»:
     // activado salvo que el usuario lo desmarque — y nunca cuando ha pedido importar sin
     // precios, que significa exactamente «no me pongas precios, ya los pongo yo».
@@ -625,16 +632,17 @@ export async function processExcelUpload(formData: FormData) {
     const decisions = decisionsFrom(formData)
 
     if (mode === 'replace') {
-      try {
-        await clearCatalog()
-      } catch (err) {
-        console.error('Error limpiando catálogo anterior:', err)
+      // Si el vaciado falla, «reemplazar todo» se comportaría como «añadir todo»: es
+      // mejor no tocar nada y decirlo que dejar al usuario creyendo lo contrario.
+      const cleared = await clearCatalog()
+      if (!cleared.success) {
+        throw new Error(`No se pudo vaciar tu catálogo antes de reemplazarlo: ${cleared.error ?? ''}`)
       }
     }
 
     let summary: ImportSummary
     try {
-      summary = await addPhaseAndServices(newPhases, phaseServicesMap, { useAI, decisions, fillMissingPrices })
+      summary = await addPhaseAndServices(newPhases, phaseServicesMap, { decisions, fillMissingPrices })
     } catch (err) {
       console.error('Error addPhaseAndServices:', err)
       const msg = err instanceof Error ? err.message : 'Desconocido'
@@ -656,9 +664,15 @@ export async function processExcelUpload(formData: FormData) {
       parts.push(`${summary.servicesEstimated} con precio estimado de la banda de mercado`)
     }
     if (summary.aiAttempted) {
-      if (summary.aiUnavailable) parts.push('la IA no estaba disponible, así que se importó sin ella')
-      else if (summary.aiAssisted > 0) parts.push(`${summary.aiAssisted} secciones fusionadas por IA`)
-      else parts.push('la IA revisó las secciones nuevas y no encontró ninguna que fusionar')
+      if (summary.aiRateLimited) {
+        parts.push('no se pudo revisar con IA (límite de usos por hora): las secciones nuevas se han creado')
+      } else if (summary.aiUnavailable) {
+        parts.push('la IA no estaba disponible, así que se importó sin ella')
+      } else if (summary.aiAssisted > 0) {
+        parts.push(`${summary.aiAssisted} secciones fusionadas por IA`)
+      } else {
+        parts.push('la IA revisó las secciones nuevas y no encontró ninguna que fusionar')
+      }
     }
 
     return { success: true, message: `Importación completada: ${parts.join(' · ')}.` }
@@ -686,6 +700,19 @@ export async function previewExcelUpload(formData: FormData) {
     // already have, this one looks like that, this one is new».
     const { targets, phaseNames } = await loadExistingServices()
     const plan = buildMatchPlan(parsed, targets, phaseNames)
+
+    // La IA se usa sola: si el documento trae líneas que se parecen a algo del catálogo
+    // sin serlo del todo, se pregunta en el mismo análisis, sin que nadie tenga que
+    // pulsar un botón. Sólo en el primer análisis de cada documento (`autoAi`): volver a
+    // analizar el mismo archivo con otra columna de precio no gasta otra llamada.
+    let ai: { suggestions: ImportMatchSuggestion[]; note: string } | null = null
+    if (formData.get('autoAi') === '1' && targets.length > 0) {
+      const companyId = await getCompanyId()
+      if (companyId) {
+        const answer = await askPartidaMatches(plan, targets, companyId)
+        ai = { suggestions: answer.suggestions, note: answer.note }
+      }
+    }
 
     const services = parsed.phases.reduce((total, phase) => total + phase.services.length, 0)
 
@@ -725,6 +752,8 @@ export async function previewExcelUpload(formData: FormData) {
       },
       headerRow: parsed.layout.headerRowIndex === null ? null : parsed.layout.headerRowIndex + 1,
       matches: plan.matches,
+      sections: plan.sections,
+      ai,
       existingServices: targets.length,
       totals: {
         phases: parsed.phases.length,
@@ -748,11 +777,19 @@ export async function previewExcelUpload(formData: FormData) {
   }
 }
 
-/** Propuesta de la IA para una línea dudosa, para marcarla en el panel de revisión. */
-export interface ImportMatchSuggestion {
-  key: string
-  targetId: string
-  targetName: string
+/**
+ * La propuesta de la IA (`ImportMatchSuggestion`) se declara en `@/types`, porque forma
+ * parte de lo que devuelve el resumen previo (`ExcelPreview.ai`) y no es un detalle de
+ * servidor: aquí sólo se importa.
+ */
+
+/** Resultado de preguntar a la IA por las líneas dudosas de una importación. */
+interface AiPartidaMatches {
+  /** `none` = no había nada dudoso, así que no se gastó ninguna llamada. */
+  status: 'ok' | 'none' | 'rate-limited' | 'error'
+  suggestions: ImportMatchSuggestion[]
+  /** Lo que se le enseña al usuario: qué propuso la IA, o por qué no hubo propuesta. */
+  note: string
 }
 
 /** Techo de dudosas que se le mandan a la IA en una llamada: la lista larga la empeora. */
@@ -781,6 +818,75 @@ function candidateServices(
 }
 
 /**
+ * Pregunta a la IA por las líneas que se parecen a algo del catálogo sin serlo del todo,
+ * en UNA sola llamada de pago. No escribe nada: devuelve propuestas que el panel de
+ * revisión marca y que el usuario puede cambiar antes de confirmar.
+ *
+ * Nunca puede inventarse una partida: su respuesta se valida contra los candidatos que
+ * se le ofrecieron (`parseItemMatches`). Y si no hay nada dudoso no se llama: eso es lo
+ * que hace que el análisis normal de un documento sea gratis.
+ *
+ * La usan las dos entradas de la app —el análisis del documento, que ya la pide sola, y
+ * el botón «volver a preguntar»— para que las dos cobren en el mismo contador y devuelvan
+ * exactamente la misma propuesta.
+ */
+async function askPartidaMatches(
+  plan: MatchPlan,
+  targets: ExistingService[],
+  companyId: string
+): Promise<AiPartidaMatches> {
+  const byKey = new Map(plan.matches.map((match) => [match.key, match]))
+  const ambiguousKeys = ambiguousMatches(plan.matches).slice(0, MAX_AI_QUESTIONS)
+
+  if (ambiguousKeys.length === 0) {
+    return { status: 'none', suggestions: [], note: 'No hay ninguna partida dudosa: no hace falta la IA.' }
+  }
+
+  const questions: ImportMatchQuestion[] = []
+  for (const key of ambiguousKeys) {
+    const entry = byKey.get(key)
+    if (!entry) continue
+    questions.push({
+      key,
+      name: entry.name,
+      unit: entry.unit,
+      candidates: candidateServices(entry.name, targets)
+    })
+  }
+
+  const supabase = createClient()
+  if (await aiRateLimitReached(supabase, companyId, IMPORT_AI_ENDPOINT)) {
+    return { status: 'rate-limited', suggestions: [], note: AI_RATE_LIMIT_MESSAGE }
+  }
+  await recordAiCall(supabase, companyId, IMPORT_AI_ENDPOINT)
+
+  try {
+    // Temperatura baja: esto es una decisión de clasificación, no redacción.
+    const answer = await askOpenAiJson<Record<string, unknown>>(itemMatchPrompt(questions), 0.1)
+    const chosen = parseItemMatches(answer, questions)
+
+    const suggestions: ImportMatchSuggestion[] = []
+    chosen.forEach((targetId, key) => {
+      const target = targets.find((service) => service.id === targetId)
+      if (target) suggestions.push({ key, targetId: target.id, targetName: target.name })
+    })
+
+    return {
+      status: 'ok',
+      suggestions,
+      note:
+        suggestions.length > 0
+          ? `La IA propone fusionar ${suggestions.length} de las ${questions.length} dudosas. Revisa la propuesta: se puede cambiar antes de confirmar.`
+          : `La IA ha revisado ${questions.length} partidas dudosas y no ve ninguna que sea la misma: se crearán nuevas.`
+    }
+  } catch (error) {
+    // Una importación nunca se cae porque la IA falle: se importa sin su ayuda.
+    const message = error instanceof Error ? error.message : ''
+    return { status: 'error', suggestions: [], note: catalogErrorMessage(message) || 'No se pudo consultar la IA.' }
+  }
+}
+
+/**
  * Pregunta a la IA por las partidas que se parecen a algo del catálogo sin serlo del
  * todo, en UNA sola llamada y sólo cuando el usuario la pide.
  *
@@ -803,58 +909,21 @@ export async function suggestItemMatches(formData: FormData) {
       }
     }
 
-    const plan = buildMatchPlan(parsed, targets, phaseNames)
-    const byKey = new Map(plan.matches.map((match) => [match.key, match]))
-    const ambiguousKeys = ambiguousMatches(plan.matches).slice(0, MAX_AI_QUESTIONS)
-
-    if (ambiguousKeys.length === 0) {
-      return {
-        success: true,
-        suggestions: [] as ImportMatchSuggestion[],
-        aiUsed: false,
-        note: 'No hay ninguna partida dudosa: no hace falta la IA.'
-      }
-    }
-
-    const questions: ImportMatchQuestion[] = []
-    for (const key of ambiguousKeys) {
-      const entry = byKey.get(key)
-      if (!entry) continue
-      questions.push({
-        key,
-        name: entry.name,
-        unit: entry.unit,
-        candidates: candidateServices(entry.name, targets)
-      })
-    }
-
-    const supabase = createClient()
     const companyId = await getCompanyId()
     if (!companyId) return { success: false, error: 'No se encontró la empresa del usuario.' }
 
-    if (await aiRateLimitReached(supabase, companyId, IMPORT_AI_ENDPOINT)) {
-      return { success: false, error: AI_RATE_LIMIT_MESSAGE }
+    const plan = buildMatchPlan(parsed, targets, phaseNames)
+    const ai = await askPartidaMatches(plan, targets, companyId)
+
+    if (ai.status === 'error' || ai.status === 'rate-limited') {
+      return { success: false, error: ai.note }
     }
-    await recordAiCall(supabase, companyId, IMPORT_AI_ENDPOINT)
-
-    // Temperatura baja: esto es una decisión de clasificación, no redacción.
-    const answer = await askOpenAiJson<Record<string, unknown>>(itemMatchPrompt(questions), 0.1)
-    const chosen = parseItemMatches(answer, questions)
-
-    const suggestions: ImportMatchSuggestion[] = []
-    chosen.forEach((targetId, key) => {
-      const target = targets.find((service) => service.id === targetId)
-      if (target) suggestions.push({ key, targetId: target.id, targetName: target.name })
-    })
 
     return {
       success: true,
-      suggestions,
-      aiUsed: true,
-      note:
-        suggestions.length > 0
-          ? `La IA propone fusionar ${suggestions.length} de las ${questions.length} dudosas. Revisa la propuesta: se puede cambiar antes de confirmar.`
-          : `La IA ha revisado ${questions.length} partidas dudosas y no ve ninguna que sea la misma: se crearán nuevas.`
+      suggestions: ai.suggestions,
+      aiUsed: ai.status === 'ok',
+      note: ai.note
     }
   } catch (error: Error | unknown) {
     if (error instanceof Error) {
@@ -873,10 +942,16 @@ export async function clearCatalog() {
   const { data: phases } = await supabase.from('catalog_phases').select('id').eq('company_id', companyId)
   const phaseIds = (phases || []).map((p: { id: string }) => p.id)
 
+  // Los errores se comprueban: un borrado que falla en silencio convertiría «reemplazar
+  // todo» en «añadir todo» —el usuario cree que su catálogo es el documento y sigue
+  // teniendo el suyo— y una importación con el modo «reemplazar» dejaría las duplicadas.
   if (phaseIds.length > 0) {
-    await supabase.from('catalog_services').delete().in('phase_id', phaseIds)
+    const { error } = await supabase.from('catalog_services').delete().in('phase_id', phaseIds)
+    if (error) return { success: false, error: catalogErrorMessage(error.message) }
   }
-  await supabase.from('catalog_phases').delete().eq('company_id', companyId)
+
+  const { error: phasesError } = await supabase.from('catalog_phases').delete().eq('company_id', companyId)
+  if (phasesError) return { success: false, error: catalogErrorMessage(phasesError.message) }
 
   revalidatePath('/catalog')
   return { success: true }

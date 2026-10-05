@@ -146,8 +146,6 @@ export default function CatalogPage() {
   const [file, setFile] = useState<File | null>(null)
   /** Añadir es el modo por defecto: subir un documento no puede borrar el catálogo. */
   const [importMode, setImportMode] = useState<'replace' | 'merge'>('merge')
-  /** Opt-in paid help: ask the AI where an imported section that matches nothing should go. */
-  const [useAi, setUseAi] = useState(false)
   const [result, setResult] = useState<{ success: boolean; text: string } | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [query, setQuery] = useState('')
@@ -226,8 +224,27 @@ export default function CatalogPage() {
    * runs it again on the same file. The catalog is only touched when the user
    * confirms what the preview shows.
    */
+  /**
+   * Deja marcadas las líneas dudosas con lo que propuso la IA, o como «nueva» cuando no
+   * vio ninguna que sea la misma. Son respuestas del panel de revisión: cualquiera se
+   * puede cambiar antes de confirmar.
+   */
+  const applySuggestions = useCallback(
+    (suggestions: { key: string }[], keys: string[], note: string | null) => {
+      setDecisions((prev) => {
+        const next = { ...prev }
+        keys.forEach((key) => {
+          next[key] = suggestions.some((suggestion) => suggestion.key === key) ? 'merge' : 'new'
+        })
+        return next
+      })
+      setMatchNote(note)
+    },
+    []
+  )
+
   const analyse = useCallback(
-    async (selected: File, options: { priceCol: number | null; noPrices: boolean }) => {
+    async (selected: File, options: { priceCol: number | null; noPrices: boolean; autoAi?: boolean }) => {
       setBusy(true)
       setResult(null)
 
@@ -235,18 +252,31 @@ export default function CatalogPage() {
       formData.append('file', selected)
       if (options.priceCol !== null) formData.append('priceCol', String(options.priceCol))
       if (options.noPrices) formData.append('noPrices', '1')
+      // El primer análisis de un documento pregunta a la IA por las líneas dudosas, sin
+      // que nadie pulse nada: una sola llamada. Volver a analizar el mismo archivo con
+      // otra columna de precio no vuelve a preguntar (y no gasta otra llamada).
+      if (options.autoAi) formData.append('autoAi', '1')
 
       const res = await previewExcelUpload(formData)
       setBusy(false)
 
-      if (res.success) {
-        setPreview(res.preview ?? null)
-      } else {
+      if (!res.success) {
         setPreview(null)
         setResult({ success: false, text: res.error || 'No se pudo analizar el documento.' })
+        return
+      }
+
+      const next = res.preview ?? null
+      setPreview(next)
+      if (options.autoAi && next) {
+        applySuggestions(
+          next.ai?.suggestions ?? [],
+          next.matches.filter((match) => match.status === 'similar').map((match) => match.key),
+          next.ai?.note ?? null
+        )
       }
     },
-    []
+    [applySuggestions]
   )
 
   const handleFileChange = async (selected: File | null) => {
@@ -260,7 +290,7 @@ export default function CatalogPage() {
     setMatchNote(null)
     if (!selected) return
 
-    await analyse(selected, { priceCol: null, noPrices: false })
+    await analyse(selected, { priceCol: null, noPrices: false, autoAi: true })
   }
 
   /** Re-reads the file with another price column or without prices at all. */
@@ -281,7 +311,6 @@ export default function CatalogPage() {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('mode', importMode)
-    if (useAi) formData.append('useAI', '1')
     if (priceCol !== null) formData.append('priceCol', String(priceCol))
     if (noPrices) formData.append('noPrices', '1')
     formData.append('fillMissing', fillMissing ? '1' : '0')
@@ -344,15 +373,11 @@ export default function CatalogPage() {
     }
 
     const suggestions = res.suggestions ?? []
-    setDecisions((prev) => {
-      const next = { ...prev }
-      doubtfulMatches.forEach((match) => {
-        const proposed = suggestions.find((suggestion) => suggestion.key === match.key)
-        next[match.key] = proposed ? 'merge' : 'new'
-      })
-      return next
-    })
-    setMatchNote(res.note || null)
+    applySuggestions(
+      suggestions,
+      doubtfulMatches.map((match) => match.key),
+      res.note || null
+    )
   }
 
   const handleUpdate = async (
@@ -752,15 +777,10 @@ export default function CatalogPage() {
               Reemplazar todo mi catálogo
             </label>
             {importMode === 'merge' && (
-              <label className="flex items-center gap-2 font-medium text-zinc-700">
-                <input
-                  type="checkbox"
-                  checked={useAi}
-                  onChange={(e) => setUseAi(e.target.checked)}
-                  disabled={busy}
-                />
-                Usar IA con las secciones que no encajen (1 llamada)
-              </label>
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-600">
+                <Sparkles size={13} className="text-blue-600 shrink-0" />
+                La IA revisa sola las secciones y las partidas dudosas (máximo una llamada por documento)
+              </span>
             )}
           </div>
           {importMode === 'replace' && (
@@ -854,6 +874,29 @@ export default function CatalogPage() {
                     : `${preview.totals.existingMatches} ya están en tu catálogo (se fusionan) · ${preview.totals.similarMatches} parecidas (decides tú) · ${preview.totals.newServices} nuevas`}
                 </p>
 
+                {preview.sections.length > 0 && preview.existingServices > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {preview.sections.map((section) => (
+                      <span
+                        key={section.name}
+                        className={`text-[10px] font-bold rounded border px-1.5 py-0.5 ${
+                          section.mergesInto
+                            ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                            : 'text-blue-800 bg-white border-blue-200'
+                        }`}
+                        title={
+                          section.mergesInto
+                            ? `Tus partidas se añadirán a tu sección «${section.mergesInto}»`
+                            : 'Sección nueva: la IA decide al confirmar si encaja en una de las tuyas'
+                        }
+                      >
+                        {section.name}
+                        {section.mergesInto ? ` → ${section.mergesInto}` : ' → nueva'}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 {doubtfulMatches.length > 0 && (
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -879,7 +922,7 @@ export default function CatalogPage() {
                         className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-300 rounded px-2 py-1 transition"
                       >
                         <Sparkles size={12} />
-                        {matchBusy ? 'Consultando…' : 'Preguntar a la IA (1 llamada)'}
+                        {matchBusy ? 'Consultando…' : 'Volver a preguntar a la IA'}
                       </button>
                     </div>
 

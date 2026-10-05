@@ -48,6 +48,79 @@ describe('matchPhaseName', () => {
   })
 })
 
+/**
+ * Las secciones del catálogo por defecto, tal cual. Los documentos que sube la gente
+ * titulan sus capítulos a su manera («Fase 1: Demoliciones»), y ese título no puede
+ * crear una segunda «Demoliciones y Trabajos Previos» al lado de la del catálogo.
+ */
+const DEFAULT_PHASE_NAMES = [
+  'Demoliciones y Trabajos Previos',
+  'Albañilería y Ayudas de Oficio',
+  'Fontanería, Saneamiento y Calefacción',
+  'Electricidad e Iluminación',
+  'Pintura y Acabados',
+  'Climatización y Aire Acondicionado',
+  'Carpintería de Madera y Cerrajería',
+  'Solados y Alicatados',
+  'Pladur, Techos y Aislamientos',
+  'Trámites y legalizaciones'
+]
+
+describe('matchPhaseName con títulos de documento real', () => {
+  it('reconoce las ocho secciones del presupuesto que subió el usuario', () => {
+    // Los nombres tal cual quedaron en su catálogo al importar (2026-10-05).
+    expect(matchPhaseName('Fase 1: Demoliciones', DEFAULT_PHASE_NAMES)).toBe(
+      'Demoliciones y Trabajos Previos'
+    )
+    expect(matchPhaseName('Fase 2: Albañileria', DEFAULT_PHASE_NAMES)).toBe(
+      'Albañilería y Ayudas de Oficio'
+    )
+    expect(matchPhaseName('Fase 5: Instalacion de electricidad.', DEFAULT_PHASE_NAMES)).toBe(
+      'Electricidad e Iluminación'
+    )
+    expect(matchPhaseName('Fase 6: Pintura.', DEFAULT_PHASE_NAMES)).toBe('Pintura y Acabados')
+    expect(matchPhaseName('Fase 7: Calefaccion.', DEFAULT_PHASE_NAMES)).toBe(
+      'Fontanería, Saneamiento y Calefacción'
+    )
+    expect(matchPhaseName('Fase 8: Climatizacion.', DEFAULT_PHASE_NAMES)).toBe(
+      'Climatización y Aire Acondicionado'
+    )
+    expect(matchPhaseName('Fase 9: Carpinteria de madera.', DEFAULT_PHASE_NAMES)).toBe(
+      'Carpintería de Madera y Cerrajería'
+    )
+    // «Fase 4» cubre fontanería Y climatización: esa sí la decide la IA, no esta regla.
+    expect(matchPhaseName('Fase 4: Instalacion fontaneria y climatizacion', DEFAULT_PHASE_NAMES)).toBeNull()
+  })
+
+  it('la caja no importa: un documento en mayúsculas se reconoce igual', () => {
+    expect(matchPhaseName('FASE 2: ALBAÑILERIA', DEFAULT_PHASE_NAMES)).toBe(
+      'Albañilería y Ayudas de Oficio'
+    )
+    expect(matchPhaseName('DEMOLICIONES', DEFAULT_PHASE_NAMES)).toBe('Demoliciones y Trabajos Previos')
+  })
+
+  it('reconoce un capítulo numerado sin la palabra «fase»', () => {
+    expect(matchPhaseName('3. Albañilería', DEFAULT_PHASE_NAMES)).toBe('Albañilería y Ayudas de Oficio')
+    expect(matchPhaseName('CAPÍTULO 2 - FONTANERÍA', DEFAULT_PHASE_NAMES)).toBe(
+      'Fontanería, Saneamiento y Calefacción'
+    )
+  })
+
+  it('el singular y el plural de la misma palabra no separan dos secciones', () => {
+    expect(matchPhaseName('Aislamiento', DEFAULT_PHASE_NAMES)).toBe('Pladur, Techos y Aislamientos')
+  })
+
+  it('una sección que cubre dos capítulos no se fusiona sola: ahí decide la IA', () => {
+    expect(matchPhaseName('Fase 4: Instalacion fontaneria y climatizacion', DEFAULT_PHASE_NAMES)).toBeNull()
+  })
+
+  it('una sección genérica no se fusiona con cualquiera', () => {
+    expect(matchPhaseName('Trabajos varios', DEFAULT_PHASE_NAMES)).toBeNull()
+    expect(matchPhaseName('Varios', DEFAULT_PHASE_NAMES)).toBeNull()
+    expect(matchPhaseName('Actuaciones generales', DEFAULT_PHASE_NAMES)).toBeNull()
+  })
+})
+
 describe('findMarketMatch', () => {
   it('una línea con el nombre exacto hereda la banda', () => {
     const match = findMarketMatch({ name: pintura.name, unit: pintura.unit })!
