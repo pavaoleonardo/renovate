@@ -55,3 +55,10 @@ export const MANUAL_PRICE_SOURCE = 'Precio propio · fijado a mano'
 
 /** Today as 'YYYY-MM-DD', the format of `catalog_services.price_reviewed_at`. */
 export const todayIsoDate = (now: Date = new Date()) => now.toISOString().slice(0, 10)
+
+/**
+ * Basis stamped on a price the importer filled in from the market band of the
+ * default catalogue, because the document brought no price for that partida. It is
+ * our own rounded midpoint, never a quote: the row says so.
+ */
+export const IMPORT_ESTIMATE_SOURCE = 'Estimación propia · banda de mercado'

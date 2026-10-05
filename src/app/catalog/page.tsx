@@ -8,6 +8,7 @@ import {
   listCatalogPhases,
   previewExcelUpload,
   processExcelUpload,
+  suggestItemMatches,
   updateCatalogService,
 } from './actions'
 import { ensureCatalog, searchCatalog, seedDefaultCatalog } from '@/app/actions'
@@ -15,7 +16,7 @@ import { DOCUMENT_ACCEPT, DOCUMENT_FORMATS_TEXT } from '@/lib/document-formats'
 import { MANUAL_PRICE_SOURCE, SOURCE_KIND_LABELS, formatReviewDate, isPriceStale, shortPriceSource, todayIsoDate } from '@/lib/price-basis'
 import { parsePriceInput } from '@/lib/price-input'
 import { AlertCircle, CheckCircle2, Box, Download, Plus, RefreshCw, Search, Sparkles, Trash2, UploadCloud, X } from 'lucide-react'
-import { CatalogService, ExcelPreview } from '@/types'
+import { CatalogService, ExcelPreview, ExcelPreviewMatch } from '@/types'
 
 const UNITS = ['m2', 'ml', 'm3', 'ud', 'kg', 'h', 'vg']
 
@@ -106,13 +107,43 @@ function PriceBandDot({ service }: { service: CatalogService }) {
   return <span role="img" aria-label={state.hint} title={state.hint} className={`w-1.5 h-1.5 shrink-0 rounded-full ${tone}`} />
 }
 
+/**
+ * Cómo queda una línea del documento respecto al catálogo de la empresa, tal como lo
+ * decidió el importador: ya está, se parece (y aquí manda el radio del panel de
+ * revisión), o es nueva.
+ */
+function MatchHint({ match, decision }: { match: ExcelPreviewMatch; decision: 'merge' | 'new' }) {
+  if (match.status === 'exact' || match.status === 'auto') {
+    return (
+      <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
+        Ya en tu catálogo · se fusiona
+      </span>
+    )
+  }
+
+  if (match.status === 'similar') {
+    return (
+      <span className="text-[10px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+        Parecida a «{match.target?.name ?? '—'}» · {decision === 'merge' ? 'se fusiona' : 'se crea nueva'}
+      </span>
+    )
+  }
+
+  return (
+    <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500 bg-zinc-100 rounded px-1.5 py-0.5">
+      Nueva{match.band ? ` · banda ${eur(match.band.min)}–${eur(match.band.max)}` : ''}
+    </span>
+  )
+}
+
 export default function CatalogPage() {
   const [services, setServices] = useState<CatalogService[]>([])
   const [phases, setPhases] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [file, setFile] = useState<File | null>(null)
-  const [importMode, setImportMode] = useState<'replace' | 'merge'>('replace')
+  /** Añadir es el modo por defecto: subir un documento no puede borrar el catálogo. */
+  const [importMode, setImportMode] = useState<'replace' | 'merge'>('merge')
   /** Opt-in paid help: ask the AI where an imported section that matches nothing should go. */
   const [useAi, setUseAi] = useState(false)
   const [result, setResult] = useState<{ success: boolean; text: string } | null>(null)
@@ -124,6 +155,13 @@ export default function CatalogPage() {
   const [priceCol, setPriceCol] = useState<number | null>(null)
   /** Import only the partidas, without prices, for a budget that carries none. */
   const [noPrices, setNoPrices] = useState(false)
+  /** Answers of the review panel, per line: merge into the similar one, or create new. */
+  const [decisions, setDecisions] = useState<Record<string, 'merge' | 'new'>>({})
+  /** Fill the partidas the document leaves without a price with the market-band estimate. */
+  const [fillMissing, setFillMissing] = useState(true)
+  /** What the AI answered about the doubtful lines, and whether it was asked. */
+  const [matchNote, setMatchNote] = useState<string | null>(null)
+  const [matchBusy, setMatchBusy] = useState(false)
   const [seedStep, setSeedStep] = useState<null | 'choose' | 'confirm-replace'>(null)
   const [newService, setNewService] = useState({ phaseId: '', name: '', unit: 'ud', price: '' })
 
@@ -211,6 +249,9 @@ export default function CatalogPage() {
     setPriceCol(null)
     setNoPrices(false)
     setResult(null)
+    // A new document is a new review: the answers of the previous one do not apply.
+    setDecisions({})
+    setMatchNote(null)
     if (!selected) return
 
     await analyse(selected, { priceCol: null, noPrices: false })
@@ -237,6 +278,8 @@ export default function CatalogPage() {
     if (useAi) formData.append('useAI', '1')
     if (priceCol !== null) formData.append('priceCol', String(priceCol))
     if (noPrices) formData.append('noPrices', '1')
+    formData.append('fillMissing', fillMissing ? '1' : '0')
+    if (Object.keys(decisions).length > 0) formData.append('decisions', JSON.stringify(decisions))
 
     const res = await processExcelUpload(formData)
     setBusy(false)
@@ -245,11 +288,65 @@ export default function CatalogPage() {
       setPreview(null)
       setPriceCol(null)
       setNoPrices(false)
+      setDecisions({})
+      setMatchNote(null)
       setResult({ success: true, text: res.message || 'Documento importado.' })
       await fetchCatalog()
     } else {
       setResult({ success: false, text: res.error || 'No se pudo importar el documento.' })
     }
+  }
+
+  /** Líneas del documento que se parecen a algo del catálogo sin serlo del todo. */
+  const doubtfulMatches = (preview?.matches ?? []).filter((match) => match.status === 'similar')
+  /** La respuesta de una línea: por defecto fusionar, que es lo que evita duplicados. */
+  const decisionFor = (key: string): 'merge' | 'new' => decisions[key] ?? 'merge'
+
+  const setDecision = (key: string, value: 'merge' | 'new') =>
+    setDecisions((prev) => ({ ...prev, [key]: value }))
+
+  const setDecisionForAll = (keys: string[], value: 'merge' | 'new') =>
+    setDecisions((prev) => {
+      const next = { ...prev }
+      keys.forEach((key) => {
+        next[key] = value
+      })
+      return next
+    })
+
+  /**
+   * Pregunta a la IA por las partidas dudosas (una sola llamada de pago) y deja su
+   * propuesta marcada en el panel. Sigue siendo una propuesta: el usuario puede
+   * cambiar cualquier línea antes de confirmar.
+   */
+  const handleAskAi = async () => {
+    if (!file) return
+    setMatchBusy(true)
+    setMatchNote(null)
+
+    const formData = new FormData()
+    formData.append('file', file)
+    if (priceCol !== null) formData.append('priceCol', String(priceCol))
+    if (noPrices) formData.append('noPrices', '1')
+
+    const res = await suggestItemMatches(formData)
+    setMatchBusy(false)
+
+    if (!res.success) {
+      setMatchNote(res.error || 'No se pudo consultar la IA.')
+      return
+    }
+
+    const suggestions = res.suggestions ?? []
+    setDecisions((prev) => {
+      const next = { ...prev }
+      doubtfulMatches.forEach((match) => {
+        const proposed = suggestions.find((suggestion) => suggestion.key === match.key)
+        next[match.key] = proposed ? 'merge' : 'new'
+      })
+      return next
+    })
+    setMatchNote(res.note || null)
   }
 
   const handleUpdate = async (id: string, updates: { name?: string; unit?: string; base_price?: number }) => {
@@ -567,12 +664,15 @@ export default function CatalogPage() {
           </label>
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <label className="flex items-center gap-2 font-medium text-zinc-700">
-              <input type="radio" checked={importMode === 'replace'} onChange={() => setImportMode('replace')} />
-              Reemplazar todo mi catálogo
-            </label>
-            <label className="flex items-center gap-2 font-medium text-zinc-700">
               <input type="radio" checked={importMode === 'merge'} onChange={() => setImportMode('merge')} />
               Añadir a lo que ya tengo
+              <span className="text-[10px] font-black uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
+                recomendado
+              </span>
+            </label>
+            <label className="flex items-center gap-2 font-medium text-zinc-700">
+              <input type="radio" checked={importMode === 'replace'} onChange={() => setImportMode('replace')} />
+              Reemplazar todo mi catálogo
             </label>
             {importMode === 'merge' && (
               <label className="flex items-center gap-2 font-medium text-zinc-700">
@@ -586,6 +686,16 @@ export default function CatalogPage() {
               </label>
             )}
           </div>
+          {importMode === 'replace' && (
+            <p className="text-xs text-red-700 font-medium flex items-start gap-2">
+              <AlertCircle size={14} className="shrink-0 mt-0.5" />
+              <span>
+                Atención: al confirmar se <strong>borrará tu catálogo actual</strong> ({services.length} partidas) y se
+                sustituirá por lo que traiga el documento. Si sólo quieres añadir sus partidas, elige «Añadir a lo que ya
+                tengo».
+              </span>
+            </p>
+          )}
           {preview && (
             <div className="rounded-xl border border-zinc-200 overflow-hidden">
               <div className="p-3 bg-zinc-50 border-b border-zinc-100 space-y-1">
@@ -659,6 +769,112 @@ export default function CatalogPage() {
                 </label>
               </div>
 
+              {/* Revisión: qué línea ya está en el catálogo, cuál se parece y cuál es nueva. */}
+              <div className="p-3 bg-blue-50/60 border-b border-blue-100 space-y-2">
+                <p className="text-xs font-bold text-blue-900">
+                  {preview.existingServices === 0
+                    ? 'Tu catálogo está vacío: todo lo que traiga el documento se creará como partida nueva.'
+                    : `${preview.totals.existingMatches} ya están en tu catálogo (se fusionan) · ${preview.totals.similarMatches} parecidas (decides tú) · ${preview.totals.newServices} nuevas`}
+                </p>
+
+                {doubtfulMatches.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] font-bold text-blue-900">Parecidas a algo que ya tienes:</span>
+                      <button
+                        type="button"
+                        onClick={() => setDecisionForAll(doubtfulMatches.map((match) => match.key), 'merge')}
+                        className="text-[11px] font-bold text-blue-800 bg-white border border-blue-200 hover:border-blue-400 rounded px-2 py-1 transition"
+                      >
+                        Fusionar todas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDecisionForAll(doubtfulMatches.map((match) => match.key), 'new')}
+                        className="text-[11px] font-bold text-zinc-600 bg-white border border-zinc-200 hover:border-zinc-400 rounded px-2 py-1 transition"
+                      >
+                        Crear todas nuevas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAskAi}
+                        disabled={busy || matchBusy}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-300 rounded px-2 py-1 transition"
+                      >
+                        <Sparkles size={12} />
+                        {matchBusy ? 'Consultando…' : 'Preguntar a la IA (1 llamada)'}
+                      </button>
+                    </div>
+
+                    <div className="max-h-56 overflow-auto space-y-1.5">
+                      {doubtfulMatches.map((match) => (
+                        <div key={match.key} className="bg-white rounded-lg border border-blue-100 px-2.5 py-2">
+                          <p className="text-xs font-bold text-zinc-800 truncate" title={match.name}>
+                            {match.name}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-[11px] text-zinc-700">
+                            <label className="flex items-center gap-1.5 font-medium">
+                              <input
+                                type="radio"
+                                name={`match-${match.key}`}
+                                checked={decisionFor(match.key) === 'merge'}
+                                onChange={() => setDecision(match.key, 'merge')}
+                              />
+                              Fusionar con «{match.target?.name}»
+                              {match.target?.base_price ? ` (${eur(match.target.base_price)})` : ''}
+                            </label>
+                            <label className="flex items-center gap-1.5 font-medium">
+                              <input
+                                type="radio"
+                                name={`match-${match.key}`}
+                                checked={decisionFor(match.key) === 'new'}
+                                onChange={() => setDecision(match.key, 'new')}
+                              />
+                              Crear una partida nueva
+                            </label>
+                            {match.band && (
+                              <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">
+                                banda {eur(match.band.min)}–{eur(match.band.max)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {matchNote && (
+                  <p className="text-[11px] font-medium text-blue-900 bg-white rounded px-2 py-1.5">{matchNote}</p>
+                )}
+
+                {preview.totals.missingPrices > 0 && !noPrices && (
+                  <label className="flex items-start gap-2 text-[11px] font-medium text-blue-900">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={fillMissing}
+                      onChange={(e) => setFillMissing(e.target.checked)}
+                      disabled={busy}
+                    />
+                    <span>
+                      Rellenar las {preview.totals.missingPrices} partidas sin precio con la estimación de la banda de
+                      mercado
+                      {preview.totals.estimatedPrices > 0
+                        ? ` (${preview.totals.estimatedPrices} tienen banda conocida y quedan marcadas como estimación; el resto se guarda a 0,00 €)`
+                        : ' (ninguna tiene banda conocida, así que se guardarán a 0,00 € para que les pongas tú el precio)'}
+                      .
+                    </span>
+                  </label>
+                )}
+                {noPrices && preview.totals.missingPrices > 0 && (
+                  <p className="text-[11px] font-medium text-blue-900/80">
+                    Has marcado «importar sin precio»: las partidas se guardarán a 0,00 € para que pongas tus tarifas, sin
+                    estimaciones.
+                  </p>
+                )}
+              </div>
+
               {preview.warnings.length > 0 && (
                 <div className="p-3 bg-amber-50 border-b border-amber-100 space-y-1.5">
                   {preview.warnings.map((warning) => (
@@ -681,24 +897,40 @@ export default function CatalogPage() {
                     <div className="px-3 py-1.5 bg-blue-50/50 text-[11px] font-black uppercase tracking-wide text-blue-900">
                       {phase.name}
                     </div>
-                    {phase.services.slice(0, 4).map((service, index) => (
-                      <div
-                        key={`${service.name}-${index}`}
-                        className="px-3 py-1.5 grid grid-cols-[1fr_48px_92px] gap-2 text-xs items-center border-t border-zinc-50"
-                      >
-                        <span className="text-zinc-700 font-medium truncate" title={service.name}>
-                          {service.name}
-                        </span>
-                        <span className="text-zinc-400 uppercase text-center">{service.unit}</span>
-                        <span
-                          className={`text-right tabular-nums font-bold ${
-                            service.hasPrice ? 'text-zinc-800' : 'text-red-500'
-                          }`}
-                        >
-                          {service.hasPrice ? eur(service.base_price) : 'sin precio'}
-                        </span>
-                      </div>
-                    ))}
+                    {phase.services.slice(0, 4).map((service, index) => {
+                      const match = preview.matches.find((entry) => entry.key === service.key)
+                      const estimate =
+                        match && match.status === 'new' && match.band && fillMissing && !noPrices
+                          ? match.band.suggested
+                          : null
+                      return (
+                        <div key={`${service.key}-${index}`} className="px-3 py-1.5 border-t border-zinc-50">
+                          <div className="grid grid-cols-[1fr_48px_92px] gap-2 text-xs items-center">
+                            <span className="text-zinc-700 font-medium truncate" title={service.name}>
+                              {service.name}
+                            </span>
+                            <span className="text-zinc-400 uppercase text-center">{service.unit}</span>
+                            <span
+                              className={`text-right tabular-nums font-bold ${
+                                service.hasPrice ? 'text-zinc-800' : estimate !== null ? 'text-blue-600' : 'text-red-500'
+                              }`}
+                              title={estimate !== null ? 'Precio estimado a partir de la banda de mercado' : undefined}
+                            >
+                              {service.hasPrice
+                                ? eur(service.base_price)
+                                : estimate !== null
+                                  ? `≈ ${eur(estimate)}`
+                                  : 'sin precio'}
+                            </span>
+                          </div>
+                          {match && (
+                            <div className="mt-0.5">
+                              <MatchHint match={match} decision={decisionFor(match.key)} />
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                     {phase.services.length > 4 && (
                       <div className="px-3 py-1.5 text-[11px] text-zinc-400 font-medium border-t border-zinc-50">
                         … y {phase.services.length - 4} partidas más en esta sección
@@ -728,6 +960,13 @@ export default function CatalogPage() {
                   : ' y la unidad por defecto (ud)'}
                 . Si un inodoro aparece a 1,00 €, ese 1,00 € es el precio que se guardará: probablemente el documento trae
                 mediciones en lugar de tarifas, así que elige la columna correcta aquí arriba o marca «importar sin precio».
+                {!preview.ignorePrices && preview.totals.estimatedPrices > 0 && fillMissing && !noPrices && (
+                  <>
+                    {' '}
+                    Los precios con <span className="text-blue-600 font-bold">≈</span> son la estimación de la banda de
+                    mercado del catálogo base: se guardan marcados como estimación para que los revises.
+                  </>
+                )}
               </p>
             </div>
           )}
@@ -741,10 +980,12 @@ export default function CatalogPage() {
           </button>
           <p className="text-[11px] text-zinc-400 leading-snug">
             Se leen <strong>todas las hojas</strong> del archivo, no sólo la primera. El precio se busca por la cabecera
-            («Precio», «PVP», «Importe»…) y, si no la hay, en la columna con más números —nunca en una columna de
-            cantidades o mediciones—; las secciones salen de una columna tipo «Fase / Capítulo / Sección / Grupo» o, si
-            no existe, de los títulos del propio documento. Todo eso se puede cambiar en el resumen de arriba antes de
-            confirmar. Formatos admitidos: {DOCUMENT_FORMATS_TEXT}.
+            («Precio», «PVP», «Importe»…) y, si no la hay, en la columna con los números que parecen dinero —nunca en una
+            columna de cantidades o mediciones—; las secciones salen de una columna tipo «Fase / Capítulo / Sección /
+            Grupo» o, si no existe, de los títulos del propio documento. Cada partida se compara con tu catálogo: las que
+            ya tienes se fusionan (sin duplicarlas y corrigiendo el precio si el documento trae otro) y las parecidas te
+            las pregunta el panel de arriba. Todo eso se puede cambiar antes de confirmar. Formatos admitidos:{' '}
+            {DOCUMENT_FORMATS_TEXT}.
           </p>
         </div>
       </div>

@@ -1,10 +1,32 @@
 'use server'
 
 import { DocumentSheet, DocumentSheets, readDocumentSheets } from '@/lib/document-rows'
-import { CatalogService, CatalogPhase, ExcelPreview } from '@/types'
+import {
+  DetectedLayout,
+  HEADER_PATTERNS,
+  LayoutOverride,
+  cellText,
+  columnLetter,
+  detectLayout,
+  normalizeUnit
+} from '@/lib/import-layout'
+import { CatalogPhase, ExcelPreview, ExcelPreviewMatch } from '@/types'
 import { addPhaseAndServices, type ImportSummary } from '@/app/actions'
 import { catalogErrorMessage } from '@/lib/catalog-errors'
 import { MANUAL_PRICE_SOURCE, todayIsoDate } from '@/lib/price-basis'
+import {
+  ExistingService,
+  ImportMatchQuestion,
+  ImportedServiceInput,
+  ambiguousMatches,
+  importLineKey,
+  itemMatchPrompt,
+  matchIncomingService,
+  parseItemMatches,
+  type ServiceMatch
+} from '@/lib/catalog-import'
+import { bandSuggestedPrice, findMarketMatch, matchPhaseName, nameSimilarity } from '@/lib/catalog-match'
+import { AI_RATE_LIMIT_MESSAGE, IMPORT_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai'
 import { parsePriceInput } from '@/lib/price-input'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
@@ -30,6 +52,8 @@ interface ParsedService {
   unit: string
   base_price: number
   hasPrice: boolean
+  /** Code column of the sheet («DEM-001»), when the document has one. */
+  code: string | null
 }
 
 interface ParsedPhase {
@@ -37,49 +61,6 @@ interface ParsedPhase {
   services: ParsedService[]
 }
 
-/** One column of the document, described for the chooser in the preview. */
-interface DetectedColumn {
-  index: number
-  letter: string
-  header: string
-  /** First few values of the column, so the user sees what is inside it. */
-  samples: string[]
-  numbers: number
-}
-
-/** How the price column was decided. */
-type PriceSource = 'header' | 'numbers' | 'user'
-
-/**
- * What the user asked for in the preview: change the price column or import
- * every line without a price (a budget that only carries measurements).
- */
-export interface LayoutOverride {
-  priceCol?: number | null
-  ignorePrices?: boolean
-}
-
-/** Where the price and the sections really live in the sheet. */
-interface DetectedLayout {
-  nameCol: number
-  unitCol: number
-  priceCol: number
-  priceHeader: string
-  priceDetectedByHeader: boolean
-  priceSource: PriceSource
-  ignorePrices: boolean
-  headerRowIndex: number | null
-  /**
-   * Column that groups partidas into sections ("Fase", "Capítulo", "Sección"…).
-   * `null` means the sheet has no such column and sections are guessed from the
-   * title rows instead.
-   */
-  sectionCol: number | null
-  sectionHeader: string
-  nameHeader: string
-  unitHeader: string
-  columns: DetectedColumn[]
-}
 
 interface ParsedSheet {
   phases: ParsedPhase[]
@@ -101,22 +82,6 @@ interface ParsedDocument {
   warnings: string[]
 }
 
-const HEADER_PATTERNS = {
-  name: /descrip|concepto|partida|servicio|trabajo|detalle/i,
-  unit: /^\s*u\.?d\b|^\s*unidad|^\s*medida|^\s*m2|^\s*m3|^\s*ml/i,
-  price: /precio|pvp|importe|coste|tarifa|€|euro/i,
-  quantity: /cantidad|^\s*cant\b|medici/i,
-  /**
-   * Column with the total of the line. It is only used to recognise an export
-   * whose real prices are missing: if «Precio final» is empty in every row while
-   * the column titled «Precio» carries small numbers, those numbers are the
-   * measurements, not the rates.
-   */
-  finalPrice: /precio\s*(final|total)|importe|total/i,
-  // Column that groups the partidas into sections. Any of these captions is
-  // enough; the word used by one particular file is not required.
-  section: /fase|cap[íi]tulo|secci[óo]n|grupo|bloque|apartado/i
-}
 
 /**
  * Words people write at the START of a title row. They are only a hint: the real
@@ -137,26 +102,6 @@ const SECTION_TITLE_PATTERNS =
  */
 const NUMBER_ONLY_TITLE = /^[\s\d€$.,*+\-–—]+$/
 
-const cellText = (value: unknown) => (value === null || value === undefined ? '' : String(value).trim())
-
-const columnLetter = (index: number) => String.fromCharCode(65 + Math.max(index, 0))
-
-/**
- * Maps the unit text of the sheet to the units the app works with. Anything we
- * do not recognise is kept exactly as written in the Excel.
- */
-function normalizeUnit(raw: string): string {
-  const text = raw.trim().toLowerCase().replace(/\s+/g, '')
-  if (!text) return 'ud'
-  if (/^(m2|m²|mts2|metro(s)?cuadrad)/.test(text)) return 'm2'
-  if (/^(m3|m³|mts3)/.test(text)) return 'm3'
-  if (/^(ml|mts?l|metro(s)?lineal)/.test(text)) return 'ml'
-  if (/^kg/.test(text)) return 'kg'
-  if (/^(h|hr|hs|hora(s)?)$/.test(text)) return 'h'
-  if (/^(vg|varios|global|p\.?a\.?|pa)$/.test(text)) return 'vg'
-  if (/^(ud|u\.?d\.?|un|unidad(es)?)$/.test(text)) return 'ud'
-  return raw.trim()
-}
 
 /**
  * Reads every sheet of the uploaded document that holds partidas.
@@ -190,182 +135,6 @@ function layoutOverrideFrom(formData: FormData): LayoutOverride {
   return override
 }
 
-/**
- * Works out which column holds the price BEFORE reading a single row.
- *
- * The previous version read the price from a hardcoded column (7th, falling back
- * to the 3rd), so a sheet whose price lives elsewhere was imported silently
- * wrong. Now the column comes from the header row ("Precio", "PVP", "Importe"
- * …), a header that says "Cantidad"/"Medición" is never used as a price, and
- * when there is no usable header we take the column that is numeric the most
- * often instead of guessing row by row.
- */
-function detectLayout(rows: unknown[][], override: LayoutOverride = {}): DetectedLayout {
-  const width = rows.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0)
-
-  const numericDensity = (col: number) => {
-    let filled = 0
-    let numeric = 0
-    for (const row of rows) {
-      const cell = row[col]
-      if (cell === '' || cell === null || cell === undefined) continue
-      filled++
-      if (parsePriceInput(cell) !== null) numeric++
-    }
-    return filled === 0 ? -1 : numeric / filled
-  }
-
-  let headerRowIndex: number | null = null
-  let nameCol = -1
-  let unitCol = -1
-  let sectionCol = -1
-  const priceCandidates = new Set<number>()
-  const quantityCols = new Set<number>()
-
-  for (let i = 0; i < Math.min(rows.length, 20); i++) {
-    const cells = (rows[i] || []).map(cellText)
-    const headerHits = cells.filter(cell => cell && (
-      HEADER_PATTERNS.name.test(cell) ||
-      HEADER_PATTERNS.unit.test(cell) ||
-      HEADER_PATTERNS.price.test(cell) ||
-      HEADER_PATTERNS.section.test(cell) ||
-      HEADER_PATTERNS.quantity.test(cell)
-    ))
-    if (headerHits.length < 2) continue
-
-    headerRowIndex = i
-    cells.forEach((cell, col) => {
-      if (!cell) return
-      if (nameCol === -1 && HEADER_PATTERNS.name.test(cell)) nameCol = col
-      if (unitCol === -1 && HEADER_PATTERNS.unit.test(cell)) unitCol = col
-      if (sectionCol === -1 && HEADER_PATTERNS.section.test(cell)) sectionCol = col
-      if (HEADER_PATTERNS.quantity.test(cell)) quantityCols.add(col)
-      if (HEADER_PATTERNS.price.test(cell) && !HEADER_PATTERNS.quantity.test(cell)) priceCandidates.add(col)
-    })
-    break
-  }
-
-  // Does that column really group rows? A caption "Fase" with no value under it
-  // is just a stray label, and it can never be the column we already read as the
-  // description (e.g. "Descripción de la fase").
-  const headerCells: string[] = headerRowIndex === null ? [] : (rows[headerRowIndex] || []).map(cellText)
-  const isQuantityHeader = (col: number) => HEADER_PATTERNS.quantity.test(headerCells[col] || '')
-
-  const sectionValues = new Set<string>()
-  if (sectionCol !== -1) {
-    for (let i = (headerRowIndex ?? -1) + 1; i < rows.length; i++) {
-      const value = cellText((rows[i] || [])[sectionCol])
-      if (value) sectionValues.add(value.toLowerCase())
-    }
-  }
-
-  // A sheet may have both "Precio" and "Precio final" and only one filled: keep
-  // the candidate that actually holds numbers.
-  let priceCol = -1
-  let bestDensity = 0
-  for (const col of Array.from(priceCandidates)) {
-    const density = numericDensity(col)
-    if (density > bestDensity) {
-      priceCol = col
-      bestDensity = density
-    }
-  }
-  let priceDetectedByHeader = priceCol !== -1
-
-  if (priceCol === -1 || numericDensity(priceCol) <= 0) {
-    priceDetectedByHeader = false
-    let fallbackCol = -1
-    let fallbackDensity = 0
-    for (let col = 2; col < Math.max(width, 3); col++) {
-      if (col === nameCol || col === unitCol || col === sectionCol) continue
-      // A column headed «Cantidad»/«Medición» is never the price, not even when it
-      // is the only one with numbers: those numbers are the measurements.
-      if (isQuantityHeader(col)) continue
-      const density = numericDensity(col)
-      if (density > fallbackDensity) {
-        fallbackCol = col
-        fallbackDensity = density
-      }
-    }
-
-    if (fallbackCol === -1 && priceCandidates.size > 0) {
-      // The document has a column named «Precio» but it is empty in every row: it
-      // is a budget still to be priced. Keep that column (the import will warn and
-      // store the partidas without a price) instead of refusing the document.
-      priceCol = Array.from(priceCandidates)[0]
-      priceDetectedByHeader = true
-    } else {
-      priceCol = fallbackCol
-    }
-  }
-
-  let priceSource: PriceSource = priceDetectedByHeader ? 'header' : 'numbers'
-
-  // What the user chose in the preview wins over anything we guessed.
-  if (typeof override.priceCol === 'number' && override.priceCol >= 0 && override.priceCol < Math.max(width, 1)) {
-    priceCol = override.priceCol
-    priceSource = 'user'
-    priceDetectedByHeader = false
-  }
-
-  if (priceCol === -1) {
-    throw new Error('No se encontró ninguna columna con precios en el documento: elige la columna del precio a mano o añade una columna «Precio» y vuelve a intentarlo.')
-  }
-
-  // Files without headers keep the historical layout: A = unit, B = description
-  // (never landing on the column we are already reading as unit or price).
-  if (nameCol === -1) {
-    const preferred = priceCol === 1 ? 2 : 1
-    nameCol =
-      [preferred, 2, 1, 0, 3].find(col => col !== unitCol && col !== priceCol && col !== sectionCol) ?? preferred
-  }
-  if (unitCol === -1) {
-    const preferred = priceCol === 0 ? 1 : 0
-    const unitCandidates = [preferred, 0, 1, 2].filter(
-      col => col !== nameCol && col !== priceCol && col !== sectionCol && !isQuantityHeader(col)
-    )
-    // No unit column at all is better than a column of measurements: without a unit
-    // the partidas fall back to «ud», with quantities read as units they do not.
-    unitCol = unitCandidates[0] ?? -1
-  }
-
-  // Only now are all four columns final, so this is where the section column can
-  // be validated: it needs values and its own cell in the header.
-  if (sectionValues.size === 0 || sectionCol === nameCol || sectionCol === unitCol || sectionCol === priceCol) {
-    sectionCol = -1
-  }
-
-  // Every column is described for the chooser of the preview, so the user can see
-  // what is inside each one («Precio»: 12,35 · 45,90 · 780,50) before confirming.
-  const columns: DetectedColumn[] = []
-  const firstDataRow = (headerRowIndex ?? -1) + 1
-  for (let col = 0; col < width; col++) {
-    const samples: string[] = []
-    let numbers = 0
-    for (let i = firstDataRow; i < rows.length; i++) {
-      const value = cellText((rows[i] || [])[col])
-      if (parsePriceInput(value) !== null) numbers++
-      if (value && samples.length < 3) samples.push(value.length > 24 ? `${value.slice(0, 23)}…` : value)
-    }
-    columns.push({ index: col, letter: columnLetter(col), header: headerCells[col] || '', samples, numbers })
-  }
-
-  return {
-    nameCol,
-    unitCol,
-    priceCol,
-    priceHeader: headerCells[priceCol] || '',
-    priceDetectedByHeader,
-    priceSource,
-    ignorePrices: override.ignorePrices === true,
-    headerRowIndex,
-    sectionCol: sectionCol === -1 ? null : sectionCol,
-    sectionHeader: sectionCol === -1 ? '' : (headerCells[sectionCol] || ''),
-    nameHeader: headerCells[nameCol] || '',
-    unitHeader: headerCells[unitCol] || '',
-    columns
-  }
-}
 
 /**
  * Reads the whole sheet into phases → services without touching the database.
@@ -485,7 +254,8 @@ function parseCatalogSheet(rows: unknown[][], override: LayoutOverride = {}): Pa
       name: nameCell,
       unit: normalizeUnit(unitCell),
       base_price: hasPrice && price !== null ? price : 0,
-      hasPrice
+      hasPrice,
+      code: layout.codeCol === null ? null : cellText(row[layout.codeCol]) || null
     })
   }
 
@@ -522,6 +292,11 @@ function parseCatalogSheet(rows: unknown[][], override: LayoutOverride = {}): Pa
       HEADER_PATTERNS.finalPrice.test(column.header) &&
       isColumnEmpty(column.index)
   )
+
+  // Which column was read, when it is not the one the headers suggested. This is the
+  // line that explains «my prices are not visible» in a sheet whose «Precio» column is
+  // empty and whose real prices live somewhere else.
+  if (layout.priceNote) warnings.push(layout.priceNote)
 
   if (layout.ignorePrices) {
     warnings.push(
@@ -653,6 +428,147 @@ function parseDocument(sheets: DocumentSheet[], override: LayoutOverride = {}): 
   }
 }
 
+/**
+ * The company's own catalogue, in the shape the matcher wants. Scoped to the company
+ * on purpose: the pool an imported line matches against is its own catalogue, never
+ * another tenant's.
+ */
+async function loadExistingServices(): Promise<{ targets: ExistingService[]; phaseNames: string[] }> {
+  const supabase = createClient()
+  const { data: phases } = await supabase
+    .from('catalog_phases')
+    .select('id, name')
+    .order('order_index', { ascending: true })
+
+  const phaseNames: string[] = []
+  const phaseNameById = new Map<string, string>()
+  for (const phase of (phases ?? []) as { id: string; name: string }[]) {
+    phaseNameById.set(String(phase.id), String(phase.name))
+    phaseNames.push(String(phase.name))
+  }
+
+  const phaseIds = Array.from(phaseNameById.keys())
+  if (phaseIds.length === 0) return { targets: [], phaseNames }
+
+  const { data } = await supabase
+    .from('catalog_services')
+    .select('id, code, name, unit, base_price, phase_id')
+    .in('phase_id', phaseIds)
+
+  const targets: ExistingService[] = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+    id: String(row.id),
+    name: String(row.name),
+    unit: String(row.unit ?? 'ud'),
+    base_price: Number(row.base_price ?? 0),
+    phase_id: String(row.phase_id),
+    phase_name: phaseNameById.get(String(row.phase_id)) ?? null,
+    code: (row.code as string) ?? null
+  }))
+
+  return { targets, phaseNames }
+}
+
+/** What the importer proposes for every line, plus the counts the review panel shows. */
+interface MatchPlan {
+  matches: ExcelPreviewMatch[]
+  totals: {
+    existingMatches: number
+    similarMatches: number
+    newServices: number
+    estimatedPrices: number
+  }
+}
+
+/**
+ * What to do with every line of the document: merge it into a partida that already
+ * exists, ask the user about it, or create it. Built from the same parse that feeds
+ * the preview, so the counts the user approves are the counts that get applied.
+ *
+ * A line repeats itself in the document only once here (the commit is what merges the
+ * repeats), because the review panel asks one question per line.
+ */
+function buildMatchPlan(parsed: ParsedDocument, existing: ExistingService[], phaseNames: string[] = []): MatchPlan {
+  const matches: ExcelPreviewMatch[] = []
+  const seen = new Set<string>()
+  const totals = { existingMatches: 0, similarMatches: 0, newServices: 0, estimatedPrices: 0 }
+
+  for (const phase of parsed.phases) {
+    // La sección con la que esta línea se va a fusionar (si ya existe) es la que manda
+    // al medir el parecido de sus partidas; la clave de la línea sigue siendo la del
+    // documento, que es la que el usuario vio en el panel.
+    const sectionName = matchPhaseName(phase.name, phaseNames) ?? phase.name
+    for (const service of phase.services) {
+      const key = importLineKey(phase.name, service.name)
+      if (seen.has(key)) continue
+      seen.add(key)
+
+      const match: ServiceMatch = matchIncomingService(
+        { name: service.name, code: service.code },
+        existing,
+        sectionName
+      )
+      const market = findMarketMatch({ name: service.name, code: service.code, unit: service.unit })
+
+      if (match.status === 'similar') totals.similarMatches++
+      else if (match.status === 'new') totals.newServices++
+      else totals.existingMatches++
+
+      // A price the company already has is never replaced by an estimate: only a line
+      // that is created and arrives without a price gets one.
+      if (!service.hasPrice && match.status === 'new' && market) totals.estimatedPrices++
+
+      matches.push({
+        key,
+        name: service.name,
+        unit: service.unit,
+        status: match.status,
+        score: Math.round(match.score * 100) / 100,
+        target: match.target
+          ? {
+              id: match.target.id,
+              name: match.target.name,
+              unit: match.target.unit,
+              base_price: match.target.base_price,
+              phase_name: match.target.phase_name ?? null
+            }
+          : null,
+        band: market
+          ? {
+              min: market.band.price_min,
+              max: market.band.price_max,
+              suggested: bandSuggestedPrice(market.band.price_min, market.band.price_max),
+              matchedName: market.name
+            }
+          : null
+      })
+    }
+  }
+
+  return { matches, totals }
+}
+
+/**
+ * The per-line answers of the review panel («merge» or «new», keyed by line). A
+ * malformed payload means «no answers»: the importer then falls back to its own
+ * rules, which never lose data, instead of failing the whole upload.
+ */
+function decisionsFrom(formData: FormData): Record<string, 'merge' | 'new'> {
+  const raw = formData.get('decisions')
+  if (typeof raw !== 'string' || !raw.trim()) return {}
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const decisions: Record<string, 'merge' | 'new'> = {}
+    Object.keys(parsed).forEach((key) => {
+      const value = parsed[key]
+      if (value === 'merge' || value === 'new') decisions[key] = value
+    })
+    return decisions
+  } catch {
+    return {}
+  }
+}
+
 export async function processExcelUpload(formData: FormData) {
   console.log('--- Iniciando procesamiento del documento ---')
   try {
@@ -660,13 +576,17 @@ export async function processExcelUpload(formData: FormData) {
     const parsed = parseDocument(document.sheets, layoutOverrideFrom(formData))
 
     const newPhases: Omit<CatalogPhase, 'id'>[] = parsed.phases.map(phase => ({ name: phase.name }))
-    const phaseServicesMap: Record<number, Omit<CatalogService, 'id' | 'phase_id'>[]> = {}
+    const phaseServicesMap: Record<number, ImportedServiceInput[]> = {}
 
     parsed.phases.forEach((phase, index) => {
-      phaseServicesMap[index] = phase.services.map(service => ({
+      phaseServicesMap[index] = phase.services.map((service) => ({
         name: service.name,
         unit: service.unit,
-        base_price: service.base_price
+        base_price: service.base_price,
+        code: service.code,
+        // Importing a line without a price must never overwrite a price the company
+        // already has for that partida: the merge reads this flag before touching it.
+        has_price: service.hasPrice
       }))
     })
 
@@ -686,10 +606,17 @@ export async function processExcelUpload(formData: FormData) {
       )
     }
 
-    // Replace by default (wipes the company's catalog first); 'merge' appends
-    const mode = (formData.get('mode') as string) === 'merge' ? 'merge' : 'replace'
+    // Añadir es el modo por defecto: subir un documento nunca debe borrar el catálogo
+    // que la empresa se ha construido. Reemplazarlo entero es una decisión explícita.
+    const mode = formData.get('mode') === 'replace' ? 'replace' : 'merge'
     // La ayuda de la IA es opcional y se paga: sólo se usa si el usuario la pide.
     const useAI = formData.get('useAI') === '1'
+    // «Rellenar los precios que falten con la estimación de la banda de mercado»:
+    // activado salvo que el usuario lo desmarque — y nunca cuando ha pedido importar sin
+    // precios, que significa exactamente «no me pongas precios, ya los pongo yo».
+    const fillMissingPrices = formData.get('fillMissing') !== '0' && !parsed.layout.ignorePrices
+    // Respuestas del panel de revisión (fusionar / crear) para las líneas dudosas.
+    const decisions = decisionsFrom(formData)
 
     if (mode === 'replace') {
       try {
@@ -701,7 +628,7 @@ export async function processExcelUpload(formData: FormData) {
 
     let summary: ImportSummary
     try {
-      summary = await addPhaseAndServices(newPhases, phaseServicesMap, { useAI })
+      summary = await addPhaseAndServices(newPhases, phaseServicesMap, { useAI, decisions, fillMissingPrices })
     } catch (err) {
       console.error('Error addPhaseAndServices:', err)
       const msg = err instanceof Error ? err.message : 'Desconocido'
@@ -713,9 +640,15 @@ export async function processExcelUpload(formData: FormData) {
     const parts = [`${summary.servicesCreated} partidas nuevas`]
     if (summary.phasesReused > 0) parts.push(`fusionadas en ${summary.phasesReused} secciones que ya tenías`)
     if (summary.phasesCreated > 0) parts.push(`${summary.phasesCreated} secciones nuevas`)
+    if (summary.servicesMergedSimilar > 0) {
+      parts.push(`${summary.servicesMergedSimilar} fusionadas por parecerse a una que ya tenías`)
+    }
     if (summary.servicesUpdated > 0) parts.push(`${summary.servicesUpdated} con el precio corregido por el documento`)
     if (summary.servicesSkipped > 0) parts.push(`${summary.servicesSkipped} que ya existían, con el mismo precio`)
     if (summary.servicesWithBand > 0) parts.push(`${summary.servicesWithBand} con banda de mercado`)
+    if (summary.servicesEstimated > 0) {
+      parts.push(`${summary.servicesEstimated} con precio estimado de la banda de mercado`)
+    }
     if (summary.aiAttempted) {
       if (summary.aiUnavailable) parts.push('la IA no estaba disponible, así que se importó sin ella')
       else if (summary.aiAssisted > 0) parts.push(`${summary.aiAssisted} secciones fusionadas por IA`)
@@ -742,6 +675,12 @@ export async function previewExcelUpload(formData: FormData) {
     const document = await readDocument(formData)
     const parsed = parseDocument(document.sheets, layoutOverrideFrom(formData))
 
+    // What each line becomes has to be decided against the company's own catalogue,
+    // so the preview loads it too: that is what turns «N partidas» into «this one you
+    // already have, this one looks like that, this one is new».
+    const { targets, phaseNames } = await loadExistingServices()
+    const plan = buildMatchPlan(parsed, targets, phaseNames)
+
     const services = parsed.phases.reduce((total, phase) => total + phase.services.length, 0)
 
     const preview: ExcelPreview = {
@@ -753,6 +692,7 @@ export async function previewExcelUpload(formData: FormData) {
       phases: parsed.phases.map(phase => ({
         name: phase.name,
         services: phase.services.map(service => ({
+          key: importLineKey(phase.name, service.name),
           name: service.name,
           unit: service.unit,
           base_price: service.base_price,
@@ -778,11 +718,17 @@ export async function previewExcelUpload(formData: FormData) {
         header: parsed.layout.unitHeader
       },
       headerRow: parsed.layout.headerRowIndex === null ? null : parsed.layout.headerRowIndex + 1,
+      matches: plan.matches,
+      existingServices: targets.length,
       totals: {
         phases: parsed.phases.length,
         services,
         missingPrices: parsed.missingPrices,
-        suspiciousPrices: parsed.suspiciousPrices
+        suspiciousPrices: parsed.suspiciousPrices,
+        existingMatches: plan.totals.existingMatches,
+        similarMatches: plan.totals.similarMatches,
+        newServices: plan.totals.newServices,
+        estimatedPrices: plan.totals.estimatedPrices
       },
       warnings: parsed.warnings
     }
@@ -793,6 +739,122 @@ export async function previewExcelUpload(formData: FormData) {
       return { success: false, error: catalogErrorMessage(error.message) }
     }
     return { success: false, error: 'Ocurrió un error desconocido al analizar el archivo.' }
+  }
+}
+
+/** Propuesta de la IA para una línea dudosa, para marcarla en el panel de revisión. */
+export interface ImportMatchSuggestion {
+  key: string
+  targetId: string
+  targetName: string
+}
+
+/** Techo de dudosas que se le mandan a la IA en una llamada: la lista larga la empeora. */
+const MAX_AI_QUESTIONS = 25
+
+/**
+ * Los candidatos que se le ofrecen a la IA para una línea: los más parecidos del
+ * catálogo de la empresa, y nada más. La IA elige entre ellos o dice que ninguno
+ * encaja, así que nunca puede inventarse una partida.
+ */
+function candidateServices(
+  name: string,
+  existing: ExistingService[],
+  limit = 5
+): ImportMatchQuestion['candidates'] {
+  return existing
+    .map((service) => ({ service, score: nameSimilarity(name, service.name) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ service }) => ({
+      id: service.id,
+      name: service.name,
+      unit: service.unit,
+      base_price: service.base_price
+    }))
+}
+
+/**
+ * Pregunta a la IA por las partidas que se parecen a algo del catálogo sin serlo del
+ * todo, en UNA sola llamada y sólo cuando el usuario la pide.
+ *
+ * No escribe nada: devuelve propuestas que el usuario ve marcadas en el panel de
+ * revisión y puede cambiar antes de confirmar. La IA nunca puede inventarse una
+ * partida: su respuesta se valida contra los candidatos que se le ofrecieron.
+ */
+export async function suggestItemMatches(formData: FormData) {
+  try {
+    const document = await readDocument(formData)
+    const parsed = parseDocument(document.sheets, layoutOverrideFrom(formData))
+    const { targets, phaseNames } = await loadExistingServices()
+
+    if (targets.length === 0) {
+      return {
+        success: true,
+        suggestions: [] as ImportMatchSuggestion[],
+        aiUsed: false,
+        note: 'Tu catálogo está vacío: no hay nada con lo que comparar todavía.'
+      }
+    }
+
+    const plan = buildMatchPlan(parsed, targets, phaseNames)
+    const byKey = new Map(plan.matches.map((match) => [match.key, match]))
+    const ambiguousKeys = ambiguousMatches(plan.matches).slice(0, MAX_AI_QUESTIONS)
+
+    if (ambiguousKeys.length === 0) {
+      return {
+        success: true,
+        suggestions: [] as ImportMatchSuggestion[],
+        aiUsed: false,
+        note: 'No hay ninguna partida dudosa: no hace falta la IA.'
+      }
+    }
+
+    const questions: ImportMatchQuestion[] = []
+    for (const key of ambiguousKeys) {
+      const entry = byKey.get(key)
+      if (!entry) continue
+      questions.push({
+        key,
+        name: entry.name,
+        unit: entry.unit,
+        candidates: candidateServices(entry.name, targets)
+      })
+    }
+
+    const supabase = createClient()
+    const companyId = await getCompanyId()
+    if (!companyId) return { success: false, error: 'No se encontró la empresa del usuario.' }
+
+    if (await aiRateLimitReached(supabase, companyId, IMPORT_AI_ENDPOINT)) {
+      return { success: false, error: AI_RATE_LIMIT_MESSAGE }
+    }
+    await recordAiCall(supabase, companyId, IMPORT_AI_ENDPOINT)
+
+    // Temperatura baja: esto es una decisión de clasificación, no redacción.
+    const answer = await askOpenAiJson<Record<string, unknown>>(itemMatchPrompt(questions), 0.1)
+    const chosen = parseItemMatches(answer, questions)
+
+    const suggestions: ImportMatchSuggestion[] = []
+    chosen.forEach((targetId, key) => {
+      const target = targets.find((service) => service.id === targetId)
+      if (target) suggestions.push({ key, targetId: target.id, targetName: target.name })
+    })
+
+    return {
+      success: true,
+      suggestions,
+      aiUsed: true,
+      note:
+        suggestions.length > 0
+          ? `La IA propone fusionar ${suggestions.length} de las ${questions.length} dudosas. Revisa la propuesta: se puede cambiar antes de confirmar.`
+          : `La IA ha revisado ${questions.length} partidas dudosas y no ve ninguna que sea la misma: se crearán nuevas.`
+    }
+  } catch (error: Error | unknown) {
+    if (error instanceof Error) {
+      return { success: false, error: catalogErrorMessage(error.message) }
+    }
+    return { success: false, error: 'Ocurrió un error desconocido al consultar la IA.' }
   }
 }
 

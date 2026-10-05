@@ -22,6 +22,14 @@ export const AI_WINDOW_MINUTES = 60
 /** Se enseña tal cual al usuario cuando la ventana está agotada. */
 export const AI_RATE_LIMIT_MESSAGE = `Límite alcanzado: máximo ${AI_RATE_LIMIT} usos por hora. Inténtalo más tarde.`
 
+/**
+ * Contador propio de la ayuda al importar un documento (secciones y partidas
+ * dudosas). Vive aquí para que las dos acciones que la usan —`addPhaseAndServices` y
+ * `suggestItemMatches`— cobren en el mismo contador: si cada una tuviera su nombre,
+ * el usuario podría gastar el doble de llamadas sin darse cuenta.
+ */
+export const IMPORT_AI_ENDPOINT = 'catalog-import-assist'
+
 /** El modelo que usan todas las funciones de IA. */
 const AI_MODEL = 'gpt-4o-mini'
 

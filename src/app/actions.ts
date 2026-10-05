@@ -2,10 +2,20 @@
 
 import { Estimate, EstimateRow, CatalogService, CatalogPhase, CompanyProfile, LabourCategory, PriceSourceKind } from '@/types';
 import { DEFAULT_CATALOG } from '@/lib/default-catalog';
-import { aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai';
+import { IMPORT_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai';
 import { catalogKey } from '@/lib/catalog-key';
-import { parseSectionMatches, priceChanged, sectionMatchPrompt, unmatchedSections } from '@/lib/catalog-import';
-import { findMarketBand, matchPhaseName } from '@/lib/catalog-match';
+import {
+  ExistingService,
+  ImportedServiceInput,
+  importLineKey,
+  matchIncomingService,
+  parseSectionMatches,
+  priceChanged,
+  sectionMatchPrompt,
+  unmatchedSections
+} from '@/lib/catalog-import';
+import { bandSuggestedPrice, findMarketMatch, matchPhaseName } from '@/lib/catalog-match';
+import { IMPORT_ESTIMATE_SOURCE, todayIsoDate } from '@/lib/price-basis';
 import { catalogErrorMessage } from '@/lib/catalog-errors';
 import { computeTotals, normalizeTaxRate } from '@/lib/estimate-totals';
 import { createClient } from '@/lib/supabase/server';
@@ -308,6 +318,10 @@ export interface ImportSummary {
   servicesUpdated: number
   servicesSkipped: number
   servicesWithBand: number
+  /** Partidas fusionadas con una parecida que ya existía (no idéntica). */
+  servicesMergedSimilar: number
+  /** Partidas que llegaron sin precio y se han guardado con la estimación de la banda. */
+  servicesEstimated: number
   /** La IA llegó a intentar el emparejado de secciones (sólo si se pidió). */
   aiAttempted: boolean
   /** Se pidió ayuda a la IA y no estaba disponible: la importación siguió igual. */
@@ -316,27 +330,41 @@ export interface ImportSummary {
   aiAssisted: number
 }
 
-/** Una partida que ya está en el catálogo, con lo justo para decidir si hay que tocarla. */
-interface ExistingCatalogService {
-  /** `null` cuando la fila acaba de insertarse en esta misma importación. */
-  id: string | null
-  base_price: number | null
+/** Las respuestas del panel de revisión: fusionar una línea concreta o crearla. */
+export type ImportDecision = 'merge' | 'new'
+
+export interface ImportOptions {
+  /** Ayuda de pago para las secciones que no encajan con ninguna existente. */
+  useAI?: boolean
+  /** Respuestas del usuario (o de la IA) para las líneas dudosas, por clave de línea. */
+  decisions?: Record<string, ImportDecision>
+  /**
+   * Rellenar con la estimación de la banda de mercado las partidas que el documento
+   * deja sin precio. Activado por defecto: un 0,00 € en el catálogo no ayuda a nadie.
+   */
+  fillMissingPrices?: boolean
 }
 
 /**
  * Guarda las secciones y partidas leídas de un documento subido.
  *
  * Es una FUSIÓN, nunca un insert ciego: una sección cuyo nombre se parece a una que
- * la empresa ya tiene —sin contar acentos ni mayúsculas, y dando por válido que un
- * nombre esté contenido en otro— recibe las partidas importadas en vez de
- * duplicarse. Las partidas que ya están en esa sección no se duplican; si el
- * documento trae un precio distinto para una de ellas, ese precio es una corrección
- * y se aplica (`servicesUpdated`).
+ * la empresa ya tiene —sin contar acentos ni mayúsculas— recibe las partidas
+ * importadas en vez de duplicarse, y lo mismo hace cada partida («Demolición de
+ * tabique de ladrillo» se fusiona con «Demolición de tabique» que ya estaba).
  *
- * Cada línea cuyo nombre coincide con una partida del catálogo por defecto se
- * guarda con la banda de mercado de esa partida (`price_min` / `price_max`). La
- * banda es una referencia nuestra: el precio es el del documento y por eso no se le
- * atribuye ninguna base (`price_source` queda vacío).
+ * Las partidas idénticas no se duplican y, si el documento trae un precio distinto,
+ * ese precio es una corrección y se aplica (`servicesUpdated`). Cuando el parecido no
+ * es concluyente, el estado es `similar` y la decisión la trae `options.decisions`
+ * (respuesta del usuario en el panel de revisión, o de la IA si la pidió): con
+ * `merge` se fusiona, con `new` se crea.
+ *
+ * Cada línea que se crea hereda la banda de mercado de la partida del catálogo por
+ * defecto que describe el mismo trabajo (`price_min` / `price_max`), por nombre
+ * exacto, por código o por parecido. Si el documento no trae precio y
+ * `options.fillMissingPrices` está activo, la partida se guarda con la estimación de
+ * esa banda y **se declara como estimación** (`IMPORT_ESTIMATE_SOURCE`); un precio
+ * del documento, en cambio, no reclama ninguna base.
  *
  * Con `options.useAI` y alguna sección que no encaje con ninguna existente, se pide
  * UNA vez a la IA que diga con cuál debería fusionarse cada una. La IA nunca puede
@@ -345,8 +373,8 @@ interface ExistingCatalogService {
  */
 export async function addPhaseAndServices(
   phases: Omit<CatalogPhase, 'id'>[],
-  phaseServicesMap: Record<number, Omit<CatalogService, 'id' | 'phase_id'>[]>,
-  options: { useAI?: boolean } = {}
+  phaseServicesMap: Record<number, ImportedServiceInput[]>,
+  options: ImportOptions = {}
 ): Promise<ImportSummary> {
   const summary: ImportSummary = {
     phasesCreated: 0,
@@ -355,6 +383,8 @@ export async function addPhaseAndServices(
     servicesUpdated: 0,
     servicesSkipped: 0,
     servicesWithBand: 0,
+    servicesMergedSimilar: 0,
+    servicesEstimated: 0,
     aiAttempted: false,
     aiUnavailable: false,
     aiAssisted: 0
@@ -387,23 +417,31 @@ export async function addPhaseAndServices(
     phaseIdByKey.set(catalogKey(String(p.name)), String(p.id));
   }
 
-  // Partidas que ya existen. No se duplican, pero tampoco se ignoran: si el documento
-  // trae otro precio para una que ya está, es una corrección y se aplica.
-  const existingBySlot = new Map<string, ExistingCatalogService>();
-  const existingByCode = new Map<string, ExistingCatalogService>();
-  const phaseIds = (existingPhases ?? []).map((p: { id: string }) => String(p.id));
+  // Partidas que ya existen: el grupo contra el que se decide cada línea importada.
+  // No se duplican, pero tampoco se ignoran: si el documento trae otro precio para una
+  // que ya está, es una corrección y se aplica.
+  const pool: ExistingService[] = [];
+  const phaseNameById = new Map<string, string>();
+  for (const p of existingPhases ?? []) {
+    phaseNameById.set(String((p as { id: string }).id), String((p as { name: string }).name));
+  }
+
+  const phaseIds = Array.from(phaseNameById.keys());
   if (phaseIds.length > 0) {
     const { data: existingServices } = await supabase
       .from('catalog_services')
-      .select('id, code, name, phase_id, base_price')
+      .select('id, code, name, unit, base_price, phase_id')
       .in('phase_id', phaseIds);
     for (const row of existingServices ?? []) {
-      const entry: ExistingCatalogService = {
+      pool.push({
         id: String(row.id),
-        base_price: row.base_price === null || row.base_price === undefined ? null : Number(row.base_price)
-      };
-      existingBySlot.set(`${row.phase_id}:${catalogKey(String(row.name))}`, entry);
-      if (row.code) existingByCode.set(catalogKey(String(row.code)), entry);
+        name: String(row.name),
+        unit: String(row.unit ?? 'ud'),
+        base_price: row.base_price === null || row.base_price === undefined ? 0 : Number(row.base_price),
+        phase_id: String(row.phase_id),
+        phase_name: phaseNameById.get(String(row.phase_id)) ?? null,
+        code: (row.code as string) ?? null
+      });
     }
   }
 
@@ -456,6 +494,9 @@ export async function addPhaseAndServices(
       summary.phasesCreated++;
     }
 
+    // La sección con la que se fusiona manda a la hora de medir el parecido de sus
+    // partidas, y es la que se usa para la clave de la decisión del panel.
+    const phaseName = matchedName ?? incomingName;
     const services = phaseServicesMap[i] || [];
     const rows: Record<string, unknown>[] = [];
 
@@ -466,36 +507,65 @@ export async function addPhaseAndServices(
         continue;
       }
 
-      const code = (service as { code?: string | null }).code ?? null;
-      const duplicate =
-        existingBySlot.get(`${phaseId}:${nameKey}`) ??
-        (code ? existingByCode.get(catalogKey(code)) : undefined);
+      const code = service.code ?? null;
+      const match = matchIncomingService({ name: service.name, code }, pool, phaseName);
+      // La respuesta del panel se busca por la sección con la que se fusiona y, si no
+      // está, por la sección tal como venía en el documento: el resumen previo usa el
+      // nombre del documento (que es el que el usuario vio) y aquí la sección puede
+      // haberse fusionado con una que ya existía, con otro nombre.
+      const decision =
+        options.decisions?.[importLineKey(phaseName, service.name)] ??
+        options.decisions?.[importLineKey(incomingName, service.name)];
 
-      if (duplicate) {
+      // ¿Trae precio de verdad? Un 0 sin la marca es «sin precio», y un «sin precio» no
+      // puede corregir a 0 un precio que la empresa ya tenía.
+      const incomingPrice = Number(service.base_price);
+      const bringsPrice =
+        service.has_price === true ||
+        (service.has_price === undefined && Number.isFinite(incomingPrice) && incomingPrice > 0);
+
+      // «Crear nueva» se obedece… salvo cuando la partida ya está con ese mismo nombre
+      // en esa misma sección: eso no sería crear, sería duplicar.
+      const target = decision === 'new' && match.status !== 'exact' ? null : match.target;
+
+      if (target) {
         // Ya está en el catálogo: la fila se queda donde está y sólo se corrige el
         // precio, y sólo cuando el documento trae otro distinto.
-        const incomingPrice = Number(service.base_price);
-        if (duplicate.id && Number.isFinite(incomingPrice) && priceChanged(duplicate.base_price, incomingPrice)) {
-          if (await updateServicePrice(supabase, duplicate.id, incomingPrice)) summary.servicesUpdated++;
+        if (bringsPrice && target.id && priceChanged(target.base_price, incomingPrice)) {
+          if (await updateServicePrice(supabase, target.id, incomingPrice)) summary.servicesUpdated++;
           else summary.servicesSkipped++;
         } else {
           summary.servicesSkipped++;
         }
+        if (match.status === 'similar') summary.servicesMergedSimilar++;
         continue;
       }
 
-      const band = findMarketBand({ name: service.name, code });
+      const market = findMarketMatch({ name: service.name, code, unit: service.unit });
+      // Sin precio en el documento y con banda creíble: se guarda la estimación, que es
+      // lo que evita partidas a 0,00 € en el catálogo. La estimación se declara.
+      const estimate =
+        !bringsPrice && options.fillMissingPrices !== false && market
+          ? bandSuggestedPrice(market.band.price_min, market.band.price_max)
+          : null;
+      if (estimate !== null) summary.servicesEstimated++;
 
-      rows.push({
+      const row: Record<string, unknown> = {
         phase_id: phaseId,
         name: service.name,
         unit: service.unit,
-        base_price: service.base_price,
+        base_price: bringsPrice ? incomingPrice : estimate ?? 0,
         code,
         origin: 'excel',
-        price_min: band?.price_min ?? null,
-        price_max: band?.price_max ?? null
-      });
+        price_min: market?.band.price_min ?? null,
+        price_max: market?.band.price_max ?? null
+      };
+      if (estimate !== null) {
+        row.price_source = IMPORT_ESTIMATE_SOURCE;
+        row.price_reviewed_at = todayIsoDate();
+      }
+
+      rows.push(row);
     }
 
     if (rows.length === 0) continue;
@@ -524,9 +594,15 @@ export async function addPhaseAndServices(
     // Sin id: lo que acaba de insertarse no puede volver a actualizarse en esta misma
     // importación, pero sí cuenta como duplicado si el documento repite la línea.
     for (const row of stored) {
-      const entry: ExistingCatalogService = { id: null, base_price: null };
-      existingBySlot.set(`${row.phase_id}:${catalogKey(String(row.name))}`, entry);
-      if (row.code) existingByCode.set(catalogKey(String(row.code)), entry);
+      pool.push({
+        id: '',
+        name: String(row.name),
+        unit: String(row.unit ?? 'ud'),
+        base_price: Number(row.base_price ?? 0),
+        phase_id: String(row.phase_id),
+        phase_name: phaseName,
+        code: (row.code as string) ?? null
+      });
     }
 
     summary.servicesCreated += stored.length;
@@ -564,9 +640,6 @@ async function updateServicePrice(
     .eq('id', id);
   return !priceOnly.error;
 }
-
-/** Contador propio para la IA de las importaciones: no compite con la nota del PDF. */
-const IMPORT_AI_ENDPOINT = 'catalog-import-assist';
 
 /**
  * Pide a la IA que empareje secciones que no encajan con ninguna existente, en UNA

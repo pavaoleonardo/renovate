@@ -98,6 +98,8 @@ export interface CompanyProfile {
  * saved: which column was read as the price and what each line will become.
  */
 export interface ExcelPreviewService {
+  /** Stable key of the line (`importLineKey`), the same one the match plan uses. */
+  key: string;
   name: string;
   unit: string;
   base_price: number;
@@ -126,6 +128,36 @@ export interface ExcelPreviewSheet {
   phases: number;
   services: number;
 }
+/**
+ * Status of an imported line against what the company already has: `exact` and
+ * `auto` merge on their own, `similar` is asked to the user (or to the AI), `new`
+ * is created.
+ */
+export type ImportMatchStatus = 'exact' | 'auto' | 'similar' | 'new';
+
+/**
+ * What the importer proposes for one line of the document, so the review panel on
+ * /catalog can show it and the user can change it before anything is saved.
+ */
+export interface ExcelPreviewMatch {
+  /** Stable key of the line: section + partida, accents and case ignored. */
+  key: string;
+  name: string;
+  unit: string;
+  status: ImportMatchStatus;
+  /** 1 on an exact match; the similarity score on `auto` / `similar`; 0 on `new`. */
+  score: number;
+  /** Partida of the company's own catalog this line merges into. */
+  target: { id: string; name: string; unit: string; base_price: number; phase_name: string | null } | null;
+  /**
+   * Market band of the matching default-catalogue partida, with the price proposed
+   * for a line the document leaves without one. `null` when nothing credible
+   * matched — a made-up band is worse than none.
+   */
+  band: { min: number; max: number; suggested: number; matchedName: string } | null;
+}
+
+
 
 export interface ExcelPreview {
   /** Name of the uploaded file. */
@@ -150,6 +182,23 @@ export interface ExcelPreview {
   /** Column read as the unit of each partida. */
   unitColumn: { letter: string; header: string };
   headerRow: number | null;
-  totals: { phases: number; services: number; missingPrices: number; suspiciousPrices: number };
+  /** What the importer proposes for each line (merge / ask / create). */
+  matches: ExcelPreviewMatch[];
+  /** Partidas the company already has in this catalog, the pool the lines match against. */
+  existingServices: number;
+  totals: {
+    phases: number;
+    services: number;
+    missingPrices: number;
+    suspiciousPrices: number;
+    /** Lines that already exist (exact or auto) and will be merged. */
+    existingMatches: number;
+    /** Lines that look like something already there: the user decides. */
+    similarMatches: number;
+    /** Lines that look like nothing and will be created. */
+    newServices: number;
+    /** Lines without a price the default catalogue can fill in with an estimate. */
+    estimatedPrices: number;
+  };
   warnings: string[];
 }
