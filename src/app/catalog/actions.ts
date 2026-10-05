@@ -2,7 +2,7 @@
 
 import { DocumentSheet, DocumentSheets, readDocumentSheets } from '@/lib/document-rows'
 import { CatalogService, CatalogPhase, ExcelPreview } from '@/types'
-import { addPhaseAndServices } from '@/app/actions'
+import { addPhaseAndServices, type ImportSummary } from '@/app/actions'
 import { catalogErrorMessage } from '@/lib/catalog-errors'
 import { MANUAL_PRICE_SOURCE, todayIsoDate } from '@/lib/price-basis'
 import { parsePriceInput } from '@/lib/price-input'
@@ -697,15 +697,24 @@ export async function processExcelUpload(formData: FormData) {
       }
     }
 
+    let summary: ImportSummary
     try {
-      await addPhaseAndServices(newPhases, phaseServicesMap)
+      summary = await addPhaseAndServices(newPhases, phaseServicesMap)
     } catch (err) {
       console.error('Error addPhaseAndServices:', err)
       const msg = err instanceof Error ? err.message : 'Desconocido'
       throw new Error(`Error guardando en base de datos: ${msg}`)
     }
 
-    return { success: true, message: `Se importaron ${newPhases.length} secciones y ${totalServices} partidas correctamente.` }
+    // Se cuenta lo que de verdad ha cambiado: importar en modo «añadir» sobre un
+    // catálogo que ya tenía esas secciones no crea nada, y hay que decirlo.
+    const parts = [`${summary.servicesCreated} partidas nuevas`]
+    if (summary.phasesReused > 0) parts.push(`fusionadas en ${summary.phasesReused} secciones que ya tenías`)
+    if (summary.phasesCreated > 0) parts.push(`${summary.phasesCreated} secciones nuevas`)
+    if (summary.servicesSkipped > 0) parts.push(`${summary.servicesSkipped} que ya existían, sin duplicar`)
+    if (summary.servicesWithBand > 0) parts.push(`${summary.servicesWithBand} con banda de mercado`)
+
+    return { success: true, message: `Importación completada: ${parts.join(' · ')}.` }
   } catch (error: Error | unknown) {
     if (error instanceof Error) {
       return { success: false, error: error.message }

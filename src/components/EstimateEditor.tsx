@@ -5,6 +5,7 @@ import { Estimate, EstimateRow, CatalogService, EstimateStatus, CompanyProfile }
 import { saveEstimateRows, updateEstimateStatus, updateEstimateInfo, updateEstimateTaxRate } from '@/app/actions';
 import { Plus, GripVertical, Trash2, Printer, CheckCircle2, ChevronUp, ChevronDown, Sparkles } from 'lucide-react';
 import { computeTotals, normalizeTaxRate, taxHint, taxLabel, TAX_RATE_OPTIONS } from '@/lib/estimate-totals';
+import { catalogKey } from '@/lib/catalog-key';
 import EstimatePDFPreview from './EstimatePDFPreview';
 
 /**
@@ -82,18 +83,26 @@ export default function EstimateEditor({
     [totalAmount, estimate.tax_rate]
   );
 
-  // Group catalog by phase
+  /**
+   * Catálogo agrupado por sección. La clave ignora acentos y mayúsculas: una
+   * sección renombrada a mano tiene que encontrar igualmente sus partidas.
+   */
   const catalogByPhase = useMemo(() => {
-    const groups: Record<string, CatalogService[]> = {};
+    const groups = new Map<string, { name: string; services: CatalogService[] }>();
     for (const s of (catalog || [])) {
-      const phase = s.phase_name || 'Sin categoría';
-      if (!groups[phase]) groups[phase] = [];
-      groups[phase].push(s);
+      const name = s.phase_name || 'Sin categoría';
+      const key = catalogKey(name);
+      const entry = groups.get(key);
+      if (entry) entry.services.push(s);
+      else groups.set(key, { name, services: [s] });
     }
     return groups;
   }, [catalog]);
 
-  const catalogPhaseNames = useMemo(() => Object.keys(catalogByPhase), [catalogByPhase]);
+  const catalogPhaseNames = useMemo(
+    () => Array.from(catalogByPhase.values()).map(p => p.name),
+    [catalogByPhase]
+  );
 
   /**
    * A budget that has just been created has no rows: the first step is always
@@ -387,11 +396,9 @@ export default function EstimateEditor({
             </div>
           ) : (
             <>
-          {/* Phones are narrower than the 8 editor columns: scroll the rows
-              sideways instead of letting them clip inside the card. */}
-          <div className="overflow-x-auto">
-          <div className="min-w-[768px]">
-          <div className="grid grid-cols-[30px_1fr_120px_60px_100px_80px_100px_30px] gap-3 p-3 bg-zinc-50/80 border-b border-zinc-100 text-[10px] font-bold text-zinc-400 uppercase tracking-widest items-center">
+          {/* On phones each line is a stacked card; from md up it is the 8-column table. */}
+          <div>
+          <div className="hidden md:grid grid-cols-[30px_1fr_120px_60px_100px_80px_100px_30px] gap-3 p-3 bg-zinc-50/80 border-b border-zinc-100 text-[10px] font-bold text-zinc-400 uppercase tracking-widest items-center">
             <div></div>
             <div>Descripción</div>
             <div>Catálogo</div>
@@ -404,6 +411,15 @@ export default function EstimateEditor({
 
           <div className="divide-y divide-zinc-50">
             {(rows || []).map((row, rowIndex) => {
+              /**
+               * Cada línea pertenece a la sección que tiene encima: es la única
+               * sección cuyas partidas puede ofrecer su desplegable.
+               */
+              const parentPhase = getParentPhaseName(rowIndex);
+              const sectionServices = parentPhase
+                ? (catalogByPhase.get(catalogKey(parentPhase))?.services ?? [])
+                : [];
+
               if (row.type === 'phase') {
                 return (
                   <div 
@@ -413,7 +429,7 @@ export default function EstimateEditor({
                     onDragOver={(e) => handleDragOver(rowIndex, e)}
                     onDrop={(e) => handleDrop(rowIndex, e)}
                     onDragEnd={handleDragEnd}
-                    className={`grid grid-cols-[30px_1fr_auto] gap-3 p-2 bg-blue-50/40 hover:bg-blue-50/80 items-center group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
+                    className={`grid grid-cols-[24px_1fr_auto] md:grid-cols-[30px_1fr_auto] gap-2 md:gap-3 p-3 md:p-2 bg-blue-50/40 hover:bg-blue-50/80 items-center group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
                   >
                     <div className="text-center cursor-grab active:cursor-grabbing text-zinc-300 hover:text-blue-500"><GripVertical size={18}/></div>
                     <input 
@@ -445,10 +461,10 @@ export default function EstimateEditor({
                   onDragOver={(e) => handleDragOver(rowIndex, e)}
                   onDrop={(e) => handleDrop(rowIndex, e)}
                   onDragEnd={handleDragEnd}
-                  className={`grid grid-cols-[30px_1fr_120px_60px_100px_80px_100px_30px] gap-3 p-2 items-center hover:bg-zinc-50/80 group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
+                  className={`grid grid-cols-2 md:grid-cols-[30px_1fr_120px_60px_100px_80px_100px_30px] gap-3 p-4 md:p-2 md:items-center border-b border-zinc-100 md:border-0 hover:bg-zinc-50/80 group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
                 >
-                   <div className="text-center cursor-grab active:cursor-grabbing text-zinc-200 hover:text-zinc-400 flex justify-center"><GripVertical size={16}/></div>
-                   <div className="flex flex-col gap-1">
+                   <div className="hidden md:flex text-center cursor-grab active:cursor-grabbing text-zinc-200 hover:text-zinc-400 justify-center"><GripVertical size={16}/></div>
+                   <div className="col-span-2 md:col-span-1 flex flex-col gap-1">
                      <input 
                         className="font-medium text-zinc-900 bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-md px-2 py-1.5 placeholder:text-zinc-300 transition w-full"
                         value={row.service_name_snapshot || ''}
@@ -468,43 +484,35 @@ export default function EstimateEditor({
                         }}
                       />
                    </div>
-                    <select 
-                      className="text-xs rounded-md border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 bg-zinc-50 text-zinc-600 truncate py-1.5 px-2 font-medium transition cursor-pointer"
+                    <div className="flex flex-col gap-1 min-w-0">
+                    <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Catálogo</label>
+                    <select
+                      className="w-full text-xs rounded-md border border-zinc-200 md:border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 bg-zinc-50 text-zinc-600 truncate py-1.5 px-2 font-medium transition cursor-pointer"
                       onChange={(e) => applyService(row.id, e.target.value)}
                       value=""
                     >
-                      <option value="" disabled>{getParentPhaseName(rowIndex) || 'Elegir del catálogo...'}</option>
-                      {(() => {
-                        const parentPhase = getParentPhaseName(rowIndex);
-                        const matchedServices = parentPhase ? catalogByPhase[parentPhase] : null;
-                        
-                        if (matchedServices && matchedServices.length > 0) {
-                          // Show only services from the parent phase
-                          return matchedServices.map(c => (
-                            <option key={c.id} value={c.id}>
-                              {c.name} ({c.unit} — {c.base_price.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })})
-                            </option>
-                          ));
-                        } else {
-                          // No matching phase or no parent: show all grouped
-                          return Object.entries(catalogByPhase).map(([phaseName, services]) => (
-                            <optgroup key={phaseName} label={phaseName}>
-                              {services.map(c => (
-                                <option key={c.id} value={c.id}>
-                                  {c.name} ({c.unit} — {c.base_price.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })})
-                                </option>
-                              ))}
-                            </optgroup>
-                          ));
-                        }
-                      })()}
+                      <option value="" disabled>{parentPhase ? `Elegir de «${parentPhase}»…` : 'Elegir del catálogo…'}</option>
+                      {sectionServices.length === 0 && (
+                        <option value="" disabled>Sin partidas del catálogo en esta sección</option>
+                      )}
+                      {sectionServices.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.unit} — {c.base_price.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })})
+                        </option>
+                      ))}
                     </select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                    <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Unid</label>
                     <input 
                       className="w-full text-center bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-md px-1 py-1.5 text-xs font-bold transition text-zinc-500 uppercase"
                       value={row.unit_snapshot || ''}
                       onChange={(e) => updateRow(row.id, { unit_snapshot: e.target.value })}
                       placeholder="m2"
                     />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                    <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-right">Precio</label>
                     <div className="relative">
                       <span className="absolute left-2 top-1.5 text-zinc-400 text-sm">€</span>
                       <input 
@@ -514,7 +522,10 @@ export default function EstimateEditor({
                         onChange={(e) => updateRow(row.id, { price_snapshot: parseFloat(e.target.value) || 0 })}
                       />
                     </div>
-                    <div className="flex items-center gap-0.5">
+                    </div>
+                    <div className="flex flex-col gap-1">
+                    <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Cant</label>
+                    <div className="flex items-center gap-0.5 justify-center">
                       <button
                         type="button"
                         onClick={() => updateRow(row.id, { quantity: Math.max(0, (row.quantity || 0) - 1) })}
@@ -536,14 +547,17 @@ export default function EstimateEditor({
                         <ChevronUp size={14} />
                       </button>
                     </div>
+                    </div>
+                    <div className="flex flex-col gap-1 text-right">
+                    <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-right">Total</label>
                     <div className="text-right text-sm font-extrabold text-zinc-900 tabular-nums">
                       {calcRowTotal(row).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                     </div>
-                    <button onClick={() => removeRow(row.id)} className="text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition flex justify-center"><Trash2 size={16} /></button>
+                    </div>
+                    <button onClick={() => removeRow(row.id)} className="text-zinc-300 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition flex justify-center items-center"><Trash2 size={16} /></button>
                 </div>
               );
             })}
-          </div>
           </div>
           </div>
 

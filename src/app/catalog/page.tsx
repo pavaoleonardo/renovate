@@ -75,7 +75,8 @@ function PriceBasis({ service }: { service: CatalogService }) {
 /**
  * Where a hand-typed price sits relative to the market band of a partida.
  * The band is a reference, never a limit: any value saves, is kept, and is what
- * estimates use. Returns null for imported partidas, which carry no band.
+ * estimates use. Returns null for a partida with no band — the default catalogue
+ * has one, and an imported line only when it matches one of those partidas.
  */
 const priceBandState = (service: CatalogService) => {
   const { base_price: price, price_min: min, price_max: max } = service

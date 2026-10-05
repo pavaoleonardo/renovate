@@ -2,6 +2,8 @@
 
 import { Estimate, EstimateRow, CatalogService, CatalogPhase, CompanyProfile, LabourCategory, PriceSourceKind } from '@/types';
 import { DEFAULT_CATALOG } from '@/lib/default-catalog';
+import { catalogKey } from '@/lib/catalog-key';
+import { findMarketBand, matchPhaseName } from '@/lib/catalog-match';
 import { catalogErrorMessage } from '@/lib/catalog-errors';
 import { computeTotals, normalizeTaxRate } from '@/lib/estimate-totals';
 import { createClient } from '@/lib/supabase/server';
@@ -143,31 +145,47 @@ export async function saveEstimateRows(estimateId: string, rows: EstimateRow[]) 
 
   const totals = computeTotals(subtotalAmount, current?.tax_rate);
 
-  // 1. Update both stored totals (base imponible + total with VAT)
-  await supabase
-    .from('estimates')
-    .update({ subtotal_amount: totals.subtotal, total_amount: totals.total })
-    .eq('id', estimateId);
+  // Row ids are generated client-side (crypto.randomUUID), so we can upsert the
+  // whole layout by id and then prune only what the user actually removed. This
+  // replaces an older "delete everything, then insert": if that write failed or
+  // the connection dropped, it silently wiped the lines already saved.
+  const rowsToUpsert = processedRows.map(r => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { created_at, ...rest } = r as EstimateRow & { created_at?: string };
+    return rest;
+  });
 
-  // 2. Wipe existing rows
-  await supabase
+  // 1. Store the new/updated lines first (idempotent thanks to onConflict: 'id').
+  const { error: upsertError } = await supabase
+    .from('estimate_rows')
+    .upsert(rowsToUpsert, { onConflict: 'id' });
+
+  if (upsertError) {
+    console.error('Error saving rows', upsertError);
+    return { success: false, subtotal: 0, totalWithTax: 0 };
+  }
+
+  // 2. Remove the lines the user deleted — only after the rest is safely stored,
+  //    so a failure here can never lose a budget.
+  const keepIds = rowsToUpsert.map(r => r.id);
+  const pruneQuery = supabase
     .from('estimate_rows')
     .delete()
     .eq('estimate_id', estimateId);
 
-  // 3. Insert newly synced ordered layout
-  const rowsToInsert = processedRows.map(r => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { id, created_at, ...rest } = r as EstimateRow & { created_at?: string };
-    return { id, ...rest };
-  });
+  const { error: pruneError } = keepIds.length > 0
+    ? await pruneQuery.not('id', 'in', `(${keepIds.join(',')})`)
+    : await pruneQuery;
 
-  const { error } = await supabase.from('estimate_rows').insert(rowsToInsert);
-
-  if (error) {
-    console.error('Error saving rows', error);
-    return { success: false, subtotal: 0, totalWithTax: 0 };
+  if (pruneError) {
+    console.error('Error pruning removed rows', pruneError);
   }
+
+  // 3. Finally reflect the recomputed totals on the estimate itself.
+  await supabase
+    .from('estimates')
+    .update({ subtotal_amount: totals.subtotal, total_amount: totals.total })
+    .eq('id', estimateId);
 
   return { success: true, subtotal: totals.subtotal, totalWithTax: totals.total };
 }
@@ -279,43 +297,175 @@ export async function searchCatalog(): Promise<CatalogService[]> {
   return services as CatalogService[];
 }
 
-export async function addPhaseAndServices(phases: Omit<CatalogPhase, 'id'>[], phaseServicesMap: Record<number, Omit<CatalogService, 'id' | 'phase_id'>[]>) {
+/** Lo que hizo una importación, para contarlo en /catalog. */
+export interface ImportSummary {
+  phasesCreated: number
+  phasesReused: number
+  servicesCreated: number
+  servicesSkipped: number
+  servicesWithBand: number
+}
+
+/**
+ * Guarda las secciones y partidas leídas de un documento subido.
+ *
+ * Es una FUSIÓN, nunca un insert ciego: una sección cuyo nombre se parece a una que
+ * la empresa ya tiene —sin contar acentos ni mayúsculas, y dando por válido que un
+ * nombre esté contenido en otro— recibe las partidas importadas en vez de
+ * duplicarse. Las partidas que ya están en esa sección se saltan, así que importar
+ * dos veces el mismo documento no cambia nada.
+ *
+ * Cada línea cuyo nombre coincide con una partida del catálogo por defecto se
+ * guarda con la banda de mercado de esa partida (`price_min` / `price_max`). La
+ * banda es una referencia nuestra: el precio es el del documento y por eso no se le
+ * atribuye ninguna base (`price_source` queda vacío).
+ */
+export async function addPhaseAndServices(
+  phases: Omit<CatalogPhase, 'id'>[],
+  phaseServicesMap: Record<number, Omit<CatalogService, 'id' | 'phase_id'>[]>
+): Promise<ImportSummary> {
+  const summary: ImportSummary = {
+    phasesCreated: 0,
+    phasesReused: 0,
+    servicesCreated: 0,
+    servicesSkipped: 0,
+    servicesWithBand: 0
+  }
+
   const supabase = createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Unauthorized');
-  
+
   const { data: userRecord } = await supabase
     .from('users')
     .select('company_id')
     .eq('id', user.id)
     .single();
-    
+
   if (!userRecord?.company_id) throw new Error("Could not identify user's company.");
 
-  for (let i = 0; i < phases.length; i++) {
-    const { data: phaseData, error: phaseErr } = await supabase
-      .from('catalog_phases')
-      .insert({ 
-        name: phases[i].name, 
-        company_id: userRecord.company_id,
-        order_index: i
-      })
-      .select('id')
-      .single();
+  const companyId = userRecord.company_id as string;
 
-    if (phaseErr || !phaseData) continue;
-    
-    const services = phaseServicesMap[i] || [];
-    if (services.length > 0) {
-      const servicesToInsert = services.map((s: Omit<CatalogService, 'id' | 'phase_id'>) => ({
-        ...s,
-        phase_id: phaseData.id,
-        origin: 'excel'
-      }));
-      await supabase.from('catalog_services').insert(servicesToInsert);
+  // Secciones que ya existen: la importada se fusiona con la que se le parezca.
+  const { data: existingPhases } = await supabase
+    .from('catalog_phases')
+    .select('id, name')
+    .eq('company_id', companyId);
+
+  const existingNames = (existingPhases ?? []).map((p: { name: string }) => String(p.name));
+  const phaseIdByKey = new Map<string, string>();
+  for (const p of existingPhases ?? []) {
+    phaseIdByKey.set(catalogKey(String(p.name)), String(p.id));
+  }
+
+  // Partidas que ya existen, para no duplicarlas al reimportar.
+  const takenInPhase = new Set<string>();
+  const takenCodes = new Set<string>();
+  const phaseIds = (existingPhases ?? []).map((p: { id: string }) => String(p.id));
+  if (phaseIds.length > 0) {
+    const { data: existingServices } = await supabase
+      .from('catalog_services')
+      .select('code, name, phase_id')
+      .in('phase_id', phaseIds);
+    for (const row of existingServices ?? []) {
+      takenInPhase.add(`${row.phase_id}:${catalogKey(String(row.name))}`);
+      if (row.code) takenCodes.add(catalogKey(String(row.code)));
     }
   }
+
+  let orderIndex = existingPhases?.length ?? 0;
+
+  for (let i = 0; i < phases.length; i++) {
+    const incomingName = phases[i].name;
+    const matchedName = matchPhaseName(incomingName, existingNames);
+    let phaseId: string | null = matchedName ? (phaseIdByKey.get(catalogKey(matchedName)) ?? null) : null;
+
+    if (phaseId) {
+      summary.phasesReused++;
+    } else {
+      const { data: phaseData, error: phaseErr } = await supabase
+        .from('catalog_phases')
+        .insert({ name: incomingName, company_id: companyId, order_index: orderIndex })
+        .select('id')
+        .single();
+
+      if (phaseErr || !phaseData) continue;
+
+      phaseId = String(phaseData.id);
+      phaseIdByKey.set(catalogKey(incomingName), phaseId);
+      existingNames.push(incomingName);
+      orderIndex++;
+      summary.phasesCreated++;
+    }
+
+    const services = phaseServicesMap[i] || [];
+    const rows: Record<string, unknown>[] = [];
+
+    for (const service of services) {
+      const nameKey = catalogKey(String(service.name));
+      if (!nameKey) {
+        summary.servicesSkipped++;
+        continue;
+      }
+      if (takenInPhase.has(`${phaseId}:${nameKey}`)) {
+        summary.servicesSkipped++;
+        continue;
+      }
+
+      const code = (service as { code?: string | null }).code ?? null;
+      if (code && takenCodes.has(catalogKey(code))) {
+        summary.servicesSkipped++;
+        continue;
+      }
+
+      const band = findMarketBand({ name: service.name, code });
+
+      rows.push({
+        phase_id: phaseId,
+        name: service.name,
+        unit: service.unit,
+        base_price: service.base_price,
+        code,
+        origin: 'excel',
+        price_min: band?.price_min ?? null,
+        price_max: band?.price_max ?? null
+      });
+    }
+
+    if (rows.length === 0) continue;
+
+    // Guarda las partidas. Si el entorno todavía no tiene la migración
+    // 20260927000000 (code / price_min / price_max) se reintenta sin esas
+    // columnas: una columna que falta nunca debe hacer perder una importación.
+    const firstAttempt = await supabase.from('catalog_services').insert(rows);
+    let error = firstAttempt.error;
+    let stored: Record<string, unknown>[] = rows;
+
+    if (error) {
+      stored = rows.map((row) => ({
+        phase_id: row.phase_id,
+        name: row.name,
+        unit: row.unit,
+        base_price: row.base_price,
+        origin: row.origin
+      }));
+      const secondAttempt = await supabase.from('catalog_services').insert(stored);
+      error = secondAttempt.error;
+    }
+
+    if (error) throw new Error(catalogErrorMessage(error.message));
+
+    for (const row of stored) {
+      takenInPhase.add(`${row.phase_id}:${catalogKey(String(row.name))}`);
+      if (row.code) takenCodes.add(catalogKey(String(row.code)));
+    }
+
+    summary.servicesCreated += stored.length;
+    summary.servicesWithBand += stored.filter((row) => row.price_min != null).length;
+  }
+
+  return summary;
 }
 
 /**
