@@ -28,7 +28,7 @@ import {
 import { bandSuggestedPrice, findMarketMatch, matchPhaseName, nameSimilarity } from '@/lib/catalog-match'
 import { AI_RATE_LIMIT_MESSAGE, IMPORT_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai'
 import { parsePriceInput } from '@/lib/price-input'
-import { normalizeMarketBand } from '@/lib/market-band'
+import { matchCatalogCase } from '@/lib/catalog-case'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 
@@ -162,7 +162,10 @@ function parseCatalogSheet(rows: unknown[][], override: LayoutOverride = {}): Pa
    * that returns to a previous value) adds its partidas to the same section
    * instead of creating a duplicated one.
    */
-  const openSection = (name: string) => {
+  const openSection = (rawName: string) => {
+    // El título se guarda con el estilo del catálogo por defecto, igual que las partidas:
+    // la hoja escribe los títulos en mayúsculas y la lista no puede quedar a dos estilos.
+    const name = matchCatalogCase(rawName)
     const key = name.toLowerCase()
     const existing = sectionIndexByName.get(key)
     if (existing === undefined) {
@@ -252,7 +255,9 @@ function parseCatalogSheet(rows: unknown[][], override: LayoutOverride = {}): Pa
     }
 
     phases[currentPhase].services.push({
-      name: nameCell,
+      // El nombre se lee en crudo para reconocer cabeceras y títulos, y se guarda ya con
+      // el estilo del catálogo por defecto.
+      name: matchCatalogCase(nameCell),
       unit: normalizeUnit(unitCell),
       base_price: hasPrice && price !== null ? price : 0,
       hasPrice,
@@ -880,13 +885,10 @@ export async function clearCatalog() {
 /**
  * Inline edit of one of the company's catalog services.
  *
- * `price_min` / `price_max` are the market band, and they are editable on purpose. The
- * default catalog ships a band for every partida it seeds and the importer inherits one
- * when the base catalog describes the same work, but a partida it does not describe (an
- * imported «Perfilería PVC Cortizo A-70», say) had no way to get a reference at all — and
- * a section without a single band shows no «Mercado» column. Editing a band never
- * re-stamps the price basis: the band is a reference, only `base_price` changes what the
- * row claims about its own price.
+ * The market band (`price_min` / `price_max`) is written by the seed of the default
+ * catalog and by the importer, which inherits it when the base catalog describes the same
+ * work. It is a reference, so editing a price never touches it: only `base_price` changes
+ * what the row claims about its own price.
  */
 export async function updateCatalogService(
   id: string,
@@ -895,8 +897,6 @@ export async function updateCatalogService(
     unit?: string
     base_price?: number
     description?: string | null
-    price_min?: number | null
-    price_max?: number | null
   }
 ) {
   const supabase = createClient()
@@ -918,13 +918,6 @@ export async function updateCatalogService(
     clean.price_reviewed_at = todayIsoDate()
   }
   if (updates.description !== undefined) clean.description = updates.description
-  if (updates.price_min !== undefined || updates.price_max !== undefined) {
-    // Both ends arrive together from the row editor; `null` on both is "quitar la banda".
-    const band = normalizeMarketBand(updates.price_min ?? null, updates.price_max ?? null)
-    if (!band.ok) return { success: false, error: band.error }
-    clean.price_min = band.band.price_min
-    clean.price_max = band.band.price_max
-  }
 
   if (Object.keys(clean).length === 0) return { success: true }
 

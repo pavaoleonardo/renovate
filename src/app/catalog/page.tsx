@@ -16,8 +16,8 @@ import { ensureCatalog, searchCatalog, seedDefaultCatalog } from '@/app/actions'
 import { DOCUMENT_ACCEPT, DOCUMENT_FORMATS_TEXT } from '@/lib/document-formats'
 import { MANUAL_PRICE_SOURCE, SOURCE_KIND_LABELS, formatReviewDate, isPriceStale, shortPriceSource, todayIsoDate } from '@/lib/price-basis'
 import { parsePriceInput } from '@/lib/price-input'
-import { hasMarketBand, normalizeMarketBand } from '@/lib/market-band'
-import { AlertCircle, CheckCircle2, Box, Download, Plus, RefreshCw, Search, Sparkles, Target, Trash2, UploadCloud, X } from 'lucide-react'
+import { hasMarketBand } from '@/lib/market-band'
+import { AlertCircle, CheckCircle2, Box, Download, Plus, RefreshCw, Search, Sparkles, Trash2, UploadCloud, X } from 'lucide-react'
 import { CatalogService, ExcelPreview, ExcelPreviewMatch } from '@/types'
 
 const UNITS = ['m2', 'ml', 'm3', 'ud', 'kg', 'h', 'vg']
@@ -170,7 +170,6 @@ export default function CatalogPage() {
    * Fila cuya banda de mercado se está editando, con los dos extremos tal como se escriben.
    * De una en una: un editor abierto por fila dejaría números a medias por toda la lista.
    */
-  const [bandEditor, setBandEditor] = useState<{ id: string; min: string; max: string } | null>(null)
 
   const fetchCatalog = useCallback(async () => {
     setLoading(true)
@@ -362,8 +361,6 @@ export default function CatalogPage() {
       name?: string
       unit?: string
       base_price?: number
-      price_min?: number | null
-      price_max?: number | null
     },
   ) => {
     // A hand-typed price is the company's own, so the row drops the seeded market-band
@@ -376,59 +373,6 @@ export default function CatalogPage() {
     setServices((prev) => prev.map((s) => (s.id === id ? { ...s, ...optimistic } : s)))
     const res = await updateCatalogService(id, updates)
     if (!res.success) setResult({ success: false, text: res.error || 'No se pudo guardar el cambio.' })
-  }
-
-  /**
-   * Banda de mercado escrita a mano. El editor existe porque el catálogo base sólo cubre el
-   * trabajo que describe: una partida importada como «Perfilería PVC Cortizo A-70» no
-   * hereda ninguna banda y, sin bandas, su sección no muestra la columna «Mercado».
-   */
-  const openBandEditor = (service: CatalogService) =>
-    setBandEditor({
-      id: service.id,
-      min: service.price_min != null ? String(service.price_min) : '',
-      max: service.price_max != null ? String(service.price_max) : '',
-    })
-
-  /** Un cambio en cualquiera de los dos campos, sólo si el editor sigue siendo el de esa fila. */
-  const editBandDraft = (id: string, patch: Partial<{ min: string; max: string }>) =>
-    setBandEditor((prev) => (prev && prev.id === id ? { ...prev, ...patch } : prev))
-
-  /**
-   * Guarda la banda tal como se escribió: los dos campos se leen con el mismo parser que un
-   * precio («1.234,56» vale) y la pareja se valida antes de salir — media banda, un mínimo
-   * por encima del máximo o un texto sin número se explican y se quedan sin guardar.
-   */
-  const handleSaveBand = async (service: CatalogService) => {
-    if (bandEditor?.id !== service.id) return
-
-    const minRaw = bandEditor.min.trim()
-    const maxRaw = bandEditor.max.trim()
-    const min = minRaw ? parsePriceInput(minRaw) : null
-    const max = maxRaw ? parsePriceInput(maxRaw) : null
-    if (minRaw && min === null) {
-      setResult({ success: false, text: `«${minRaw}» no es un número: revisa el mínimo de la banda.` })
-      return
-    }
-    if (maxRaw && max === null) {
-      setResult({ success: false, text: `«${maxRaw}» no es un número: revisa el máximo de la banda.` })
-      return
-    }
-
-    const band = normalizeMarketBand(min, max)
-    if (!band.ok) {
-      setResult({ success: false, text: band.error })
-      return
-    }
-
-    setBandEditor(null)
-    await handleUpdate(service.id, band.band)
-  }
-
-  /** Quita la banda (los dos extremos a null). El precio se queda como estaba. */
-  const handleClearBand = async (service: CatalogService) => {
-    setBandEditor(null)
-    await handleUpdate(service.id, { price_min: null, price_max: null })
   }
 
   const handleDelete = async (service: CatalogService) => {
@@ -457,9 +401,6 @@ export default function CatalogPage() {
     // Optimistic: the section disappears at once, and the reload puts back the truth.
     setServices((prev) => prev.filter((s) => s.phase_id !== phaseId))
     setPhases((prev) => prev.filter((p) => p.id !== phaseId))
-    if (bandEditor && services.some((s) => s.id === bandEditor.id && s.phase_id === phaseId)) {
-      setBandEditor(null)
-    }
     setNewService((prev) => (prev.phaseId === phaseId ? { ...prev, phaseId: '' } : prev))
 
     const res = await deleteCatalogPhase(phaseId)
@@ -1160,10 +1101,9 @@ export default function CatalogPage() {
       ) : (
         <div className="space-y-6">
           {Object.entries(grouped).map(([phaseName, list]) => {
-            // The default catalog carries a market band, the importer inherits one and a person
-            // can set one by hand («Banda de mercado» in any row). The column shows up as soon
-            // as one partida in the section has a band, so imported partidas never sit in an
-            // empty column.
+            // The default catalog carries a market band and the importer inherits one when the
+            // base catalog describes the same work. The column shows up as soon as one partida
+            // in the section has a band, so imported partidas never sit in an empty column.
             const withMarket = list.some((s) => hasMarketBand(s))
             const columns = withMarket ? PARTIDA_COLUMNS_MARKET : PARTIDA_COLUMNS_BASE
 
@@ -1221,63 +1161,6 @@ export default function CatalogPage() {
                           <p className="text-[11px] text-zinc-400 mt-1 pl-1.5 leading-snug">{service.description}</p>
                         )}
                         <PriceBasis service={service} />
-                        {/* La banda se fija a mano aquí: el catálogo base sólo cubre el trabajo
-                            que describe, y una sección sin ninguna banda no enseña la columna
-                            «Mercado». Se edita dentro de la celda de la descripción para no
-                            tocar la rejilla de columnas, que es la misma en la cabecera y en
-                            cada fila. */}
-                        {bandEditor?.id === service.id ? (
-                          <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-1.5">
-                            <input
-                              value={bandEditor.min}
-                              onChange={(e) => editBandDraft(service.id, { min: e.target.value })}
-                              inputMode="decimal"
-                              placeholder="mín."
-                              aria-label={`Mínimo de la banda de mercado de ${service.name}`}
-                              className="w-20 text-right text-xs font-bold tabular-nums text-zinc-700 bg-white border border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 outline-none transition"
-                            />
-                            <span className="text-xs text-zinc-400">–</span>
-                            <input
-                              value={bandEditor.max}
-                              onChange={(e) => editBandDraft(service.id, { max: e.target.value })}
-                              inputMode="decimal"
-                              placeholder="máx."
-                              aria-label={`Máximo de la banda de mercado de ${service.name}`}
-                              className="w-20 text-right text-xs font-bold tabular-nums text-zinc-700 bg-white border border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 outline-none transition"
-                            />
-                            <span className="text-[11px] font-bold text-zinc-400">€</span>
-                            <button
-                              onClick={() => handleSaveBand(service)}
-                              className="text-[10px] font-black uppercase tracking-wide text-white bg-blue-600 hover:bg-blue-700 rounded px-2 py-1 transition"
-                            >
-                              Guardar
-                            </button>
-                            {hasMarketBand(service) && (
-                              <button
-                                onClick={() => handleClearBand(service)}
-                                className="text-[10px] font-black uppercase tracking-wide text-zinc-500 hover:text-red-600 px-1 py-1 transition"
-                              >
-                                Quitar
-                              </button>
-                            )}
-                            <button
-                              onClick={() => setBandEditor(null)}
-                              title="Cancelar sin guardar"
-                              aria-label="Cancelar la edición de la banda"
-                              className="text-zinc-300 hover:text-zinc-600 p-1 transition"
-                            >
-                              <X size={12} />
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => openBandEditor(service)}
-                            title="Fijar la banda de mercado de esta partida (es una referencia, no un límite)"
-                            className="inline-flex items-center gap-1 mt-1.5 pl-1.5 text-[10px] font-bold uppercase tracking-wide text-zinc-400 hover:text-blue-600 transition"
-                          >
-                            <Target size={11} /> Banda de mercado
-                          </button>
-                        )}
                       </div>
                       <input
                         defaultValue={service.unit}
@@ -1331,15 +1214,11 @@ export default function CatalogPage() {
                         <Trash2 size={16} />
                       </button>
                       {withMarket && (
-                        <button
-                          onClick={() => openBandEditor(service)}
-                          title="Editar la banda de mercado de esta partida (la banda es una referencia, no un límite)"
-                          className="hidden md:block text-right text-[11px] font-bold text-zinc-500 hover:text-blue-600 tabular-nums transition"
-                        >
+                        <span className="hidden md:block text-right text-[11px] font-bold text-zinc-500 tabular-nums">
                           {service.price_min != null && service.price_max != null
                             ? `${eur(service.price_min)} – ${eur(service.price_max)}`
                             : '—'}
-                        </button>
+                        </span>
                       )}
                     </div>
                   ))}
