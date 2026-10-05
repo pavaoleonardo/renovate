@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   addCatalogService,
   createCatalogPhase,
+  deleteCatalogPhase,
   deleteCatalogService,
   listCatalogPhases,
   previewExcelUpload,
@@ -15,7 +16,8 @@ import { ensureCatalog, searchCatalog, seedDefaultCatalog } from '@/app/actions'
 import { DOCUMENT_ACCEPT, DOCUMENT_FORMATS_TEXT } from '@/lib/document-formats'
 import { MANUAL_PRICE_SOURCE, SOURCE_KIND_LABELS, formatReviewDate, isPriceStale, shortPriceSource, todayIsoDate } from '@/lib/price-basis'
 import { parsePriceInput } from '@/lib/price-input'
-import { AlertCircle, CheckCircle2, Box, Download, Plus, RefreshCw, Search, Sparkles, Trash2, UploadCloud, X } from 'lucide-react'
+import { hasMarketBand, normalizeMarketBand } from '@/lib/market-band'
+import { AlertCircle, CheckCircle2, Box, Download, Plus, RefreshCw, Search, Sparkles, Target, Trash2, UploadCloud, X } from 'lucide-react'
 import { CatalogService, ExcelPreview, ExcelPreviewMatch } from '@/types'
 
 const UNITS = ['m2', 'ml', 'm3', 'ud', 'kg', 'h', 'vg']
@@ -164,6 +166,11 @@ export default function CatalogPage() {
   const [matchBusy, setMatchBusy] = useState(false)
   const [seedStep, setSeedStep] = useState<null | 'choose' | 'confirm-replace'>(null)
   const [newService, setNewService] = useState({ phaseId: '', name: '', unit: 'ud', price: '' })
+  /**
+   * Fila cuya banda de mercado se está editando, con los dos extremos tal como se escriben.
+   * De una en una: un editor abierto por fila dejaría números a medias por toda la lista.
+   */
+  const [bandEditor, setBandEditor] = useState<{ id: string; min: string; max: string } | null>(null)
 
   const fetchCatalog = useCallback(async () => {
     setLoading(true)
@@ -349,7 +356,16 @@ export default function CatalogPage() {
     setMatchNote(res.note || null)
   }
 
-  const handleUpdate = async (id: string, updates: { name?: string; unit?: string; base_price?: number }) => {
+  const handleUpdate = async (
+    id: string,
+    updates: {
+      name?: string
+      unit?: string
+      base_price?: number
+      price_min?: number | null
+      price_max?: number | null
+    },
+  ) => {
     // A hand-typed price is the company's own, so the row drops the seeded market-band
     // basis immediately — `updateCatalogService` writes the very same values to the
     // database, this only avoids showing a stale badge until the next load.
@@ -362,6 +378,59 @@ export default function CatalogPage() {
     if (!res.success) setResult({ success: false, text: res.error || 'No se pudo guardar el cambio.' })
   }
 
+  /**
+   * Banda de mercado escrita a mano. El editor existe porque el catálogo base sólo cubre el
+   * trabajo que describe: una partida importada como «Perfilería PVC Cortizo A-70» no
+   * hereda ninguna banda y, sin bandas, su sección no muestra la columna «Mercado».
+   */
+  const openBandEditor = (service: CatalogService) =>
+    setBandEditor({
+      id: service.id,
+      min: service.price_min != null ? String(service.price_min) : '',
+      max: service.price_max != null ? String(service.price_max) : '',
+    })
+
+  /** Un cambio en cualquiera de los dos campos, sólo si el editor sigue siendo el de esa fila. */
+  const editBandDraft = (id: string, patch: Partial<{ min: string; max: string }>) =>
+    setBandEditor((prev) => (prev && prev.id === id ? { ...prev, ...patch } : prev))
+
+  /**
+   * Guarda la banda tal como se escribió: los dos campos se leen con el mismo parser que un
+   * precio («1.234,56» vale) y la pareja se valida antes de salir — media banda, un mínimo
+   * por encima del máximo o un texto sin número se explican y se quedan sin guardar.
+   */
+  const handleSaveBand = async (service: CatalogService) => {
+    if (bandEditor?.id !== service.id) return
+
+    const minRaw = bandEditor.min.trim()
+    const maxRaw = bandEditor.max.trim()
+    const min = minRaw ? parsePriceInput(minRaw) : null
+    const max = maxRaw ? parsePriceInput(maxRaw) : null
+    if (minRaw && min === null) {
+      setResult({ success: false, text: `«${minRaw}» no es un número: revisa el mínimo de la banda.` })
+      return
+    }
+    if (maxRaw && max === null) {
+      setResult({ success: false, text: `«${maxRaw}» no es un número: revisa el máximo de la banda.` })
+      return
+    }
+
+    const band = normalizeMarketBand(min, max)
+    if (!band.ok) {
+      setResult({ success: false, text: band.error })
+      return
+    }
+
+    setBandEditor(null)
+    await handleUpdate(service.id, band.band)
+  }
+
+  /** Quita la banda (los dos extremos a null). El precio se queda como estaba. */
+  const handleClearBand = async (service: CatalogService) => {
+    setBandEditor(null)
+    await handleUpdate(service.id, { price_min: null, price_max: null })
+  }
+
   const handleDelete = async (service: CatalogService) => {
     if (!window.confirm(`¿Eliminar «${service.name}» del catálogo?`)) return
     setServices((prev) => prev.filter((s) => s.id !== service.id))
@@ -370,6 +439,34 @@ export default function CatalogPage() {
       setResult({ success: false, text: res.error || 'No se pudo eliminar.' })
       await fetchCatalog()
     }
+  }
+
+  /**
+   * Deletes a whole section, partidas included.
+   *
+   * The confirmation states the count out loud: the button sits next to «N partidas», and a
+   * section of 40 lines should not vanish on a click that reads like a heading.
+   */
+  const handleDeleteSection = async (phaseId: string, phaseName: string, count: number) => {
+    const warning =
+      count > 0
+        ? `¿Eliminar la sección «${phaseName}» y sus ${count} partida${count === 1 ? '' : 's'}? Las partidas también se borran del catálogo.`
+        : `¿Eliminar la sección «${phaseName}»? No tiene ninguna partida.`
+    if (!window.confirm(warning)) return
+
+    // Optimistic: the section disappears at once, and the reload puts back the truth.
+    setServices((prev) => prev.filter((s) => s.phase_id !== phaseId))
+    setPhases((prev) => prev.filter((p) => p.id !== phaseId))
+    if (bandEditor && services.some((s) => s.id === bandEditor.id && s.phase_id === phaseId)) {
+      setBandEditor(null)
+    }
+    setNewService((prev) => (prev.phaseId === phaseId ? { ...prev, phaseId: '' } : prev))
+
+    const res = await deleteCatalogPhase(phaseId)
+    if (!res.success) {
+      setResult({ success: false, text: res.error || 'No se pudo eliminar la sección.' })
+    }
+    await fetchCatalog()
   }
 
   const handleAddService = async () => {
@@ -419,6 +516,45 @@ export default function CatalogPage() {
     acc[phaseName].push(service)
     return acc
   }, {} as Record<string, CatalogService[]>)
+
+  /**
+   * Sections with no partidas at all. The list below is built from the partidas, so a section
+   * whose lines were deleted one by one (or that a bad title row left empty) never gets a card —
+   * and with no card there is no way to delete it. It is skipped while a search is running,
+   * because a search is about finding partidas, not sections.
+   */
+  const emptyPhases = term
+    ? []
+    : phases.filter((phase) => !services.some((service) => service.phase_id === phase.id))
+
+  /**
+   * Strip for the sections that hold no partidas. It is the only place where they can be
+   * deleted, so it appears both under the partidas and on its own when nothing is left.
+   */
+  const emptyPhasesStrip = emptyPhases.length > 0 && (
+    <div className="space-y-2">
+      <p className="text-[10px] font-black text-zinc-400 uppercase tracking-wide pl-1">Secciones sin partidas</p>
+      {emptyPhases.map((phase) => (
+        <div
+          key={phase.id}
+          className="bg-white rounded-2xl border border-dashed border-zinc-200 px-5 py-3 flex items-center justify-between gap-3"
+        >
+          <h3 className="font-bold text-zinc-500 uppercase tracking-wider text-xs min-w-0 truncate">{phase.name}</h3>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-[11px] font-bold text-zinc-300">0 partidas</span>
+            <button
+              type="button"
+              onClick={() => handleDeleteSection(phase.id, phase.name, 0)}
+              className="p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
+              title="Eliminar la sección"
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 
   return (
     <div className="max-w-shell mx-auto py-12 px-4 sm:px-6 lg:px-8">
@@ -1011,19 +1147,24 @@ export default function CatalogPage() {
           </p>
         </div>
       ) : visible.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-zinc-100 p-12 text-center">
-          <p className="text-zinc-500 font-medium">Ninguna partida coincide con «{query.trim()}».</p>
-          <p className="text-zinc-400 text-sm mt-1">
-            Se busca en el código, el nombre y la descripción. Borra la búsqueda para volver a ver las{' '}
-            {services.length} partidas.
-          </p>
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl border border-zinc-100 p-12 text-center">
+            <p className="text-zinc-500 font-medium">Ninguna partida coincide con «{query.trim()}».</p>
+            <p className="text-zinc-400 text-sm mt-1">
+              Se busca en el código, el nombre y la descripción. Borra la búsqueda para volver a ver las{' '}
+              {services.length} partidas.
+            </p>
+          </div>
+          {emptyPhasesStrip}
         </div>
       ) : (
         <div className="space-y-6">
           {Object.entries(grouped).map(([phaseName, list]) => {
-            // Only the default catalog carries a market band, so the column shows
-            // up when the section has one: imported partidas never sit in an empty column.
-            const withMarket = list.some((s) => s.price_min != null && s.price_max != null)
+            // The default catalog carries a market band, the importer inherits one and a person
+            // can set one by hand («Banda de mercado» in any row). The column shows up as soon
+            // as one partida in the section has a band, so imported partidas never sit in an
+            // empty column.
+            const withMarket = list.some((s) => hasMarketBand(s))
             const columns = withMarket ? PARTIDA_COLUMNS_MARKET : PARTIDA_COLUMNS_BASE
 
             return (
@@ -1031,9 +1172,19 @@ export default function CatalogPage() {
                 key={phaseName}
                 className="bg-white rounded-2xl border border-zinc-100 overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.02)]"
               >
-                <div className="bg-zinc-50 px-5 py-3 border-b border-zinc-100 flex items-center justify-between">
-                  <h3 className="font-bold text-zinc-800 uppercase tracking-wider text-xs">{phaseName}</h3>
-                  <span className="text-[11px] font-bold text-zinc-400">{list.length} partidas</span>
+                <div className="bg-zinc-50 px-5 py-3 border-b border-zinc-100 flex items-center justify-between gap-3">
+                  <h3 className="font-bold text-zinc-800 uppercase tracking-wider text-xs min-w-0 truncate">{phaseName}</h3>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[11px] font-bold text-zinc-400">{list.length} partidas</span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSection(list[0].phase_id, phaseName, list.length)}
+                      className="p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
+                      title="Eliminar la sección y sus partidas"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
                 </div>
                 {/* Column header: same grid as the rows below, so every column lines up. */}
                 <div
@@ -1070,6 +1221,63 @@ export default function CatalogPage() {
                           <p className="text-[11px] text-zinc-400 mt-1 pl-1.5 leading-snug">{service.description}</p>
                         )}
                         <PriceBasis service={service} />
+                        {/* La banda se fija a mano aquí: el catálogo base sólo cubre el trabajo
+                            que describe, y una sección sin ninguna banda no enseña la columna
+                            «Mercado». Se edita dentro de la celda de la descripción para no
+                            tocar la rejilla de columnas, que es la misma en la cabecera y en
+                            cada fila. */}
+                        {bandEditor?.id === service.id ? (
+                          <div className="flex flex-wrap items-center gap-1.5 mt-2 pl-1.5">
+                            <input
+                              value={bandEditor.min}
+                              onChange={(e) => editBandDraft(service.id, { min: e.target.value })}
+                              inputMode="decimal"
+                              placeholder="mín."
+                              aria-label={`Mínimo de la banda de mercado de ${service.name}`}
+                              className="w-20 text-right text-xs font-bold tabular-nums text-zinc-700 bg-white border border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 outline-none transition"
+                            />
+                            <span className="text-xs text-zinc-400">–</span>
+                            <input
+                              value={bandEditor.max}
+                              onChange={(e) => editBandDraft(service.id, { max: e.target.value })}
+                              inputMode="decimal"
+                              placeholder="máx."
+                              aria-label={`Máximo de la banda de mercado de ${service.name}`}
+                              className="w-20 text-right text-xs font-bold tabular-nums text-zinc-700 bg-white border border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 outline-none transition"
+                            />
+                            <span className="text-[11px] font-bold text-zinc-400">€</span>
+                            <button
+                              onClick={() => handleSaveBand(service)}
+                              className="text-[10px] font-black uppercase tracking-wide text-white bg-blue-600 hover:bg-blue-700 rounded px-2 py-1 transition"
+                            >
+                              Guardar
+                            </button>
+                            {hasMarketBand(service) && (
+                              <button
+                                onClick={() => handleClearBand(service)}
+                                className="text-[10px] font-black uppercase tracking-wide text-zinc-500 hover:text-red-600 px-1 py-1 transition"
+                              >
+                                Quitar
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setBandEditor(null)}
+                              title="Cancelar sin guardar"
+                              aria-label="Cancelar la edición de la banda"
+                              className="text-zinc-300 hover:text-zinc-600 p-1 transition"
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => openBandEditor(service)}
+                            title="Fijar la banda de mercado de esta partida (es una referencia, no un límite)"
+                            className="inline-flex items-center gap-1 mt-1.5 pl-1.5 text-[10px] font-bold uppercase tracking-wide text-zinc-400 hover:text-blue-600 transition"
+                          >
+                            <Target size={11} /> Banda de mercado
+                          </button>
+                        )}
                       </div>
                       <input
                         defaultValue={service.unit}
@@ -1123,11 +1331,15 @@ export default function CatalogPage() {
                         <Trash2 size={16} />
                       </button>
                       {withMarket && (
-                        <div className="hidden md:block text-right text-[11px] font-bold text-zinc-500 tabular-nums">
+                        <button
+                          onClick={() => openBandEditor(service)}
+                          title="Editar la banda de mercado de esta partida (la banda es una referencia, no un límite)"
+                          className="hidden md:block text-right text-[11px] font-bold text-zinc-500 hover:text-blue-600 tabular-nums transition"
+                        >
                           {service.price_min != null && service.price_max != null
                             ? `${eur(service.price_min)} – ${eur(service.price_max)}`
-                            : ''}
-                        </div>
+                            : '—'}
+                        </button>
                       )}
                     </div>
                   ))}
@@ -1135,6 +1347,8 @@ export default function CatalogPage() {
               </div>
             )
           })}
+
+          {emptyPhasesStrip}
         </div>
       )}
 

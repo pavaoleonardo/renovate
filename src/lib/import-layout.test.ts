@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectLayout, normalizeUnit } from '@/lib/import-layout'
+import { cellText, detectLayout, normalizeUnit } from '@/lib/import-layout'
 
 /**
  * Telling a price column from a column of measurements. Every case here is a shape a
@@ -101,6 +101,25 @@ describe('detectLayout', () => {
   })
 })
 
+describe('cellText', () => {
+  it('no toca las mayúsculas: la partida se guarda como está escrita en el documento', () => {
+    // Un presupuesto de proveedor llega en MAYÚSCULAS. Si el lector cambiara la caja, el
+    // nombre guardado no sería el que el cliente lee en el PDF ni el que aparece en el
+    // desplegable del presupuesto: la partida dejaría de reconocerse de un vistazo.
+    expect(cellText('TIRAS PLETINAS PVC 50 MM')).toBe('TIRAS PLETINAS PVC 50 MM')
+    expect(cellText('Perfilería PVC Cortizo A-70')).toBe('Perfilería PVC Cortizo A-70')
+    // Los acentos tampoco se tocan: son parte de la descripción, no ruido que quitar.
+    expect(cellText('  RETIRADA DE ESCOMBROS  ')).toBe('RETIRADA DE ESCOMBROS')
+  })
+
+  it('trata el 0 y el hueco como cosas distintas', () => {
+    // Un 0 de la hoja es una cantidad, no una celda vacía: lo que decide es `null`, no el falsy.
+    expect(cellText(0)).toBe('0')
+    expect(cellText(null)).toBe('')
+    expect(cellText(undefined)).toBe('')
+  })
+})
+
 describe('normalizeUnit', () => {
   it('normaliza lo que reconoce y respeta lo que no', () => {
     expect(normalizeUnit('M2')).toBe('m2')
@@ -109,5 +128,6 @@ describe('normalizeUnit', () => {
     expect(normalizeUnit('ml')).toBe('ml')
     // Una unidad propia de la empresa no se puede inventar: se queda como está escrita.
     expect(normalizeUnit('jornal')).toBe('jornal')
+    expect(normalizeUnit('CJ')).toBe('CJ')
   })
 })

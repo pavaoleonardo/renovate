@@ -28,6 +28,7 @@ import {
 import { bandSuggestedPrice, findMarketMatch, matchPhaseName, nameSimilarity } from '@/lib/catalog-match'
 import { AI_RATE_LIMIT_MESSAGE, IMPORT_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai'
 import { parsePriceInput } from '@/lib/price-input'
+import { normalizeMarketBand } from '@/lib/market-band'
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 
@@ -876,10 +877,27 @@ export async function clearCatalog() {
   return { success: true }
 }
 
-/** Inline edit of one of the company's catalog services. */
+/**
+ * Inline edit of one of the company's catalog services.
+ *
+ * `price_min` / `price_max` are the market band, and they are editable on purpose. The
+ * default catalog ships a band for every partida it seeds and the importer inherits one
+ * when the base catalog describes the same work, but a partida it does not describe (an
+ * imported «Perfilería PVC Cortizo A-70», say) had no way to get a reference at all — and
+ * a section without a single band shows no «Mercado» column. Editing a band never
+ * re-stamps the price basis: the band is a reference, only `base_price` changes what the
+ * row claims about its own price.
+ */
 export async function updateCatalogService(
   id: string,
-  updates: { name?: string; unit?: string; base_price?: number; description?: string | null }
+  updates: {
+    name?: string
+    unit?: string
+    base_price?: number
+    description?: string | null
+    price_min?: number | null
+    price_max?: number | null
+  }
 ) {
   const supabase = createClient()
 
@@ -900,6 +918,13 @@ export async function updateCatalogService(
     clean.price_reviewed_at = todayIsoDate()
   }
   if (updates.description !== undefined) clean.description = updates.description
+  if (updates.price_min !== undefined || updates.price_max !== undefined) {
+    // Both ends arrive together from the row editor; `null` on both is "quitar la banda".
+    const band = normalizeMarketBand(updates.price_min ?? null, updates.price_max ?? null)
+    if (!band.ok) return { success: false, error: band.error }
+    clean.price_min = band.band.price_min
+    clean.price_max = band.band.price_max
+  }
 
   if (Object.keys(clean).length === 0) return { success: true }
 
@@ -915,6 +940,49 @@ export async function deleteCatalogService(id: string) {
   const supabase = createClient()
 
   const { error } = await supabase.from('catalog_services').delete().eq('id', id)
+  if (error) return { success: false, error: catalogErrorMessage(error.message) }
+
+  revalidatePath('/catalog')
+  revalidatePath('/estimates')
+  return { success: true }
+}
+
+/**
+ * Deletes a section together with its partidas.
+ *
+ * A section is not just a heading: the importer creates one for every title it reads and the
+ * «Sección» selectors offer it, so a section left with no partidas (its lines were deleted one
+ * by one, or the document's title rows were wrong) would otherwise stay forever in the
+ * dropdown and in the import preview with no way to get rid of it. The partidas go with it —
+ * a partida whose section is gone would show up nowhere.
+ */
+export async function deleteCatalogPhase(phaseId: string) {
+  const supabase = createClient()
+  const companyId = await getCompanyId()
+  if (!companyId) return { success: false, error: 'No se encontró la empresa del usuario.' }
+
+  // Company first: without this check the delete would work on any id a client sent.
+  const { data: phase } = await supabase
+    .from('catalog_phases')
+    .select('id')
+    .eq('id', phaseId)
+    .eq('company_id', companyId)
+    .maybeSingle()
+  if (!phase) return { success: false, error: 'Esa sección ya no existe.' }
+
+  // `catalog_services` carries no company_id of its own: it is scoped through its phase,
+  // which is the row just verified.
+  const { error: servicesError } = await supabase
+    .from('catalog_services')
+    .delete()
+    .eq('phase_id', phaseId)
+  if (servicesError) return { success: false, error: catalogErrorMessage(servicesError.message) }
+
+  const { error } = await supabase
+    .from('catalog_phases')
+    .delete()
+    .eq('id', phaseId)
+    .eq('company_id', companyId)
   if (error) return { success: false, error: catalogErrorMessage(error.message) }
 
   revalidatePath('/catalog')
