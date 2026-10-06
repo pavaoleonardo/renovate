@@ -3,7 +3,7 @@
 import { Estimate, EstimateRow, CompanyProfile } from '@/types';
 import { computeTotals } from '@/lib/estimate-totals';
 import { X, Printer, Mail, Download, MessageCircle } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const fmt = (n: number) => n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 
@@ -30,6 +30,17 @@ export default function EstimatePDFPreview({
   const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [hint, setHint] = useState('');
+  /**
+   * Whether this device can attach the PDF through the OS share sheet. Only
+   * phones/tablets can (see `canSharePdf`), and it reads `navigator`, so it is
+   * evaluated on mount to keep the server and client markup identical.
+   */
+  const [shareSupported, setShareSupported] = useState(false);
+  useEffect(() => {
+    setShareSupported(canSharePdf());
+    // canSharePdf() is a stable read of navigator; running once is intended.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const subtotal = rows.reduce((acc, r) => {
     if (r.type === 'item') return acc + (r.price_snapshot || 0) * (r.quantity || 0);
@@ -155,7 +166,7 @@ export default function EstimatePDFPreview({
       if (await sharePdfFile(blob, message)) return;
       downloadBlob(blob);
       window.location.href = `mailto:${emailTo}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`;
-      setHint('PDF descargado: adjúntalo al correo antes de enviarlo.');
+      setHint(`Listo: se ha descargado «${pdfFileName}» y se ha abierto tu correo. Adjunta ese archivo antes de enviar.`);
     } catch (err) {
       console.error('No se pudo preparar el correo:', err);
       setHint('No se pudo generar el PDF. Prueba con «Imprimir → Guardar como PDF».');
@@ -187,7 +198,7 @@ export default function EstimatePDFPreview({
       downloadBlob(blob);
       if (tab) tab.location.href = waUrl;
       else window.location.href = waUrl;
-      setHint('PDF descargado: adjúntalo en WhatsApp antes de enviar.');
+      setHint(`Listo: se ha descargado «${pdfFileName}» y se ha abierto WhatsApp. Adjunta ese archivo antes de enviar.`);
     } catch (err) {
       tab?.close();
       console.error('No se pudo preparar el WhatsApp:', err);
@@ -253,10 +264,15 @@ export default function EstimatePDFPreview({
                 disabled={!emailTo || busy}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold text-sm disabled:opacity-50"
               >
-                {busy ? 'Generando…' : 'Enviar por email'}
+                {busy ? 'Generando…' : shareSupported ? 'Compartir por email' : 'Abrir correo con el PDF'}
               </button>
             </div>
-            {hint && <p className="max-w-4xl mx-auto px-6 pb-3 text-[11px] font-medium text-zinc-500">{hint}</p>}
+            <p className="max-w-4xl mx-auto px-6 pb-2 text-[11px] font-medium text-zinc-500 leading-relaxed">
+              {shareSupported
+                ? `Se abrirá la hoja de compartir del sistema: elige tu app de correo y «${pdfFileName}» irá adjunto con el mensaje ya escrito.`
+                : `Se descargará «${pdfFileName}» y se abrirá tu aplicación de correo con el mensaje ya escrito. Adjunta el PDF descargado antes de enviar.`}
+            </p>
+            {hint && <p className="max-w-4xl mx-auto px-6 pb-3 text-[11px] font-bold text-blue-700">{hint}</p>}
           </div>
         )}
 
@@ -275,10 +291,15 @@ export default function EstimatePDFPreview({
                 disabled={busy}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg font-bold text-sm disabled:opacity-50"
               >
-                {busy ? 'Generando…' : 'Enviar por WhatsApp'}
+                {busy ? 'Generando…' : shareSupported ? 'Compartir por WhatsApp' : 'Abrir WhatsApp con el PDF'}
               </button>
             </div>
-            {hint && <p className="max-w-4xl mx-auto px-6 pb-3 text-[11px] font-medium text-zinc-500">{hint}</p>}
+            <p className="max-w-4xl mx-auto px-6 pb-2 text-[11px] font-medium text-zinc-500 leading-relaxed">
+              {shareSupported
+                ? `Se abrirá la hoja de compartir del sistema: elige WhatsApp y «${pdfFileName}» irá adjunto con el mensaje ya escrito.`
+                : `Se descargará «${pdfFileName}» y se abrirá WhatsApp Web con el mensaje ya escrito. Adjunta el PDF descargado antes de enviar.`}
+            </p>
+            {hint && <p className="max-w-4xl mx-auto px-6 pb-3 text-[11px] font-bold text-emerald-700">{hint}</p>}
           </div>
         )}
       </div>
