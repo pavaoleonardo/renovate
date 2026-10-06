@@ -30,6 +30,13 @@ export const AI_RATE_LIMIT_MESSAGE = `Límite alcanzado: máximo ${AI_RATE_LIMIT
  */
 export const IMPORT_AI_ENDPOINT = 'catalog-import-assist'
 
+/**
+ * Contador propio de «dictar un cambio → propuesta de líneas». Separado del de
+ * importación porque son dos gestos distintos y caros de forma distinta: nadie
+ * que dicte un cambio debe consumir el cupo de subir un documento.
+ */
+export const VOICE_AI_ENDPOINT = 'voice-change'
+
 /** El modelo que usan todas las funciones de IA. */
 const AI_MODEL = 'gpt-4o-mini'
 

@@ -1,6 +1,7 @@
 export type EstimateStatus = 'draft' | 'sent' | 'approved' | 'rejected' | 'in_progress' | 'completed' | 'expired';
 export type RowType = 'phase' | 'item' | 'note';
-
+/** 'principal' is a normal budget; 'modificacion' is an addendum that hangs from one. */
+export type EstimateKind = 'principal' | 'modificacion';
 export interface Estimate {
   id: string;
   client_name: string;
@@ -14,6 +15,14 @@ export interface Estimate {
   total_amount: number;
   warranty_months: number;
   warranty_end_date: string | null;
+  /** 'principal' for a normal budget; 'modificacion' for an addendum. Absent = principal. */
+  kind?: EstimateKind;
+  /** The budget this addendum hangs from; null/absent for a principal. */
+  parent_estimate_id?: string | null;
+  /** Base (VAT excluded) frozen when the budget was approved; never rewritten later. */
+  approved_subtotal?: number | null;
+  /** Total (VAT included) frozen when the budget was approved. */
+  approved_total?: number | null;
   created_at?: string;
 }
 
@@ -33,6 +42,45 @@ export interface EstimateRow {
 
   quantity: number;
   total: number;
+}
+
+export type PendingNoteStatus = 'open' | 'converted' | 'dismissed';
+
+/**
+ * A change captured on the job ("Cambios de esta obra") that has not yet become a
+ * line of the budget. Internal only — it never reaches the client PDF.
+ */
+export interface PendingNote {
+  id: string;
+  estimate_id: string;
+  /** Free text as the user jotted it down, e.g. "Añadir 3 enchufes en el salón". */
+  text: string;
+  /** Section it belongs to, when known. */
+  section: string | null;
+  /** Suggested quantity / price; the price is confirmed in the editor. */
+  quantity: number | null;
+  price: number | null;
+  status: PendingNoteStatus;
+  created_at?: string;
+}
+
+/** A budget line the AI proposes from a dictated change. Never has a price yet. */
+export interface VoiceProposalLine {
+  /** Plain-language description, e.g. "Instalar 3 enchufes en el salón". */
+  description: string;
+  quantity: number;
+  unit: string;
+}
+
+/**
+ * What OpenAI returns for a dictated change: a short summary, the section it
+ * seems to belong to, and the lines to add. The user reviews and edits all of it
+ * before anything reaches the budget.
+ */
+export interface VoiceProposal {
+  summary: string;
+  section: string | null;
+  lines: VoiceProposalLine[];
 }
 
 export type CatalogUnit = 'm2' | 'ml' | 'm3' | 'ud' | 'vg' | 'h' | 'kg';

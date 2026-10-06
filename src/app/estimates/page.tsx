@@ -1,8 +1,8 @@
 import Link from 'next/link';
-import { getEstimates, createEstimate, getCompanyProfile } from '@/app/actions';
+import { getEstimates, createEstimate, getCompanyProfile, getPendingCounts } from '@/app/actions';
 import { redirect } from 'next/navigation';
 import { Estimate } from '@/types';
-import { computeTotals } from '@/lib/estimate-totals';
+import { combinedTotals, computeTotals } from '@/lib/estimate-totals';
 
 const fmt = (n: number) => n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 
@@ -64,8 +64,20 @@ function formatDate(dateStr?: string) {
 export default async function EstimatesList() {
   const { data } = await getEstimates();
   const company = await getCompanyProfile();
+  const pendingCounts = await getPendingCounts();
   const estimates = data || [];
-  const grouped = groupByYear(estimates);
+
+  // A Modificación hangs from its principal; the list shows them nested below it.
+  const modificaciones = estimates.filter(e => e.kind === 'modificacion' && e.parent_estimate_id);
+  const principals = estimates.filter(e => !(e.kind === 'modificacion' && e.parent_estimate_id));
+  const modsByParent: Record<string, Estimate[]> = {};
+  for (const m of modificaciones) {
+    const parentId = m.parent_estimate_id as string;
+    if (!modsByParent[parentId]) modsByParent[parentId] = [];
+    modsByParent[parentId].push(m);
+  }
+
+  const grouped = groupByYear(principals);
   const years = Object.keys(grouped).sort((a, b) => b.localeCompare(a)); // newest first
 
   const handleNewEstimate = async (formData: FormData) => {
@@ -126,17 +138,28 @@ export default async function EstimatesList() {
               {grouped[year].map(e => {
                 const st = getStatusLabel(e);
                 const totals = estimateTotals(e);
+                const mods = modsByParent[e.id] || [];
+                const modsTotals = combinedTotals(mods);
+                const combined = combinedTotals([e, ...mods]);
                 return (
+                  <div key={e.id}>
                   <Link 
-                    key={e.id} 
                     href={`/estimates/${e.id}`} 
                     className="grid grid-cols-1 md:grid-cols-[80px_1.2fr_1.5fr_100px_150px_80px] gap-3 p-4 items-center hover:bg-blue-50/50 transition group"
                   >
                     <div className="text-xs font-bold text-zinc-400 hidden md:block">
                       {formatDate(e.created_at)}
                     </div>
-                    <div className="font-bold text-zinc-900 truncate">
-                      {e.client_name}
+                    <div className="font-bold text-zinc-900 truncate flex items-center gap-2">
+                      <span className="truncate">{e.client_name}</span>
+                      {pendingCounts[e.id] ? (
+                        <span
+                          title={`${pendingCounts[e.id]} cambio(s) de obra sin resolver`}
+                          className="shrink-0 text-[10px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded"
+                        >
+                          📝 {pendingCounts[e.id]}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="text-sm text-zinc-500 font-medium truncate hidden md:block">
                       📍 {e.property_address}
@@ -147,15 +170,46 @@ export default async function EstimatesList() {
                       </span>
                     </div>
                     <div className="text-right">
-                      <div className="tabular-nums font-extrabold text-zinc-900">{fmt(totals.total)}</div>
+                      <div className="tabular-nums font-extrabold text-zinc-900">{fmt(mods.length ? combined.total : totals.total)}</div>
                       <div className="text-[10px] font-bold text-zinc-400 tabular-nums">
-                        {totals.taxRate > 0 ? `Base ${fmt(totals.subtotal)} · IVA ${totals.taxRate}%` : 'Sin IVA'}
+                        {mods.length
+                          ? `${fmt(totals.total)} + ${fmt(modsTotals.total)}`
+                          : totals.taxRate > 0 ? `Base ${fmt(totals.subtotal)} · IVA ${totals.taxRate}%` : 'Sin IVA'}
                       </div>
                     </div>
                     <div className="text-blue-600 text-right font-bold text-sm opacity-0 group-hover:opacity-100 transition hidden md:block">
                       Abrir &rarr;
                     </div>
                   </Link>
+
+                  {mods.map(m => {
+                    const mst = getStatusLabel(m);
+                    const mtotals = estimateTotals(m);
+                    return (
+                      <Link
+                        key={m.id}
+                        href={`/estimates/${m.id}`}
+                        className="grid grid-cols-1 md:grid-cols-[80px_1.2fr_1.5fr_100px_150px_80px] gap-3 px-4 py-3 items-center bg-amber-50/40 hover:bg-amber-50 transition group"
+                      >
+                        <div className="text-xs font-bold text-amber-500 hidden md:block">{formatDate(m.created_at)}</div>
+                        <div className="font-bold text-zinc-700 truncate flex items-center gap-2">
+                          <span className="text-amber-500">↳</span>
+                          <span className="truncate">Modificación · {m.client_name}</span>
+                        </div>
+                        <div className="text-sm text-zinc-400 font-medium truncate hidden md:block">{m.property_address}</div>
+                        <div>
+                          <span className={`px-2.5 py-1 rounded-md text-[11px] font-black uppercase tracking-wide ${mst.color}`}>
+                            {mst.label}
+                          </span>
+                        </div>
+                        <div className="text-right tabular-nums font-extrabold text-amber-800">{fmt(mtotals.total)}</div>
+                        <div className="text-amber-600 text-right font-bold text-sm opacity-0 group-hover:opacity-100 transition hidden md:block">
+                          Abrir &rarr;
+                        </div>
+                      </Link>
+                    );
+                  })}
+                  </div>
                 );
               })}
             </div>

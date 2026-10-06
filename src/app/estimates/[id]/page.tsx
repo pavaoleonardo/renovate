@@ -1,9 +1,15 @@
-import { getEstimateDetails, searchCatalog, getCompanyProfile, ensureCatalog } from '@/app/actions';
+import { getEstimateDetails, searchCatalog, getCompanyProfile, ensureCatalog, getPendingNotes, getParentEstimate } from '@/app/actions';
 import EstimateEditor from '@/components/EstimateEditor';
 import Link from 'next/link';
 
 export default async function EstimateDocumentPage({ params }: { params: { id: string } }) {
   const { estimate, rows = [] } = await getEstimateDetails(params.id);
+  const { data: pendingNotes } = await getPendingNotes(params.id);
+
+  // A Modificación: fetch the original budget for the heading and the link back.
+  const parentEstimate = estimate.kind === 'modificacion' && estimate.parent_estimate_id
+    ? await getParentEstimate(estimate.parent_estimate_id)
+    : null;
 
   let catalog = (await searchCatalog()) || [];
   if (catalog.length === 0) {
@@ -30,6 +36,8 @@ export default async function EstimateDocumentPage({ params }: { params: { id: s
       initialRows={rows} 
       catalog={catalog}
       company={company}
+      initialPendingNotes={pendingNotes || []}
+      parentEstimate={parentEstimate}
     />
   );
 }

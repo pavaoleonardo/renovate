@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeTotals, normalizeTaxRate, round2, taxHint, taxLabel } from '@/lib/estimate-totals'
+import { combinedTotals, computeTotals, normalizeTaxRate, round2, taxHint, taxLabel } from '@/lib/estimate-totals'
 
 /**
  * The money in a budget. This file exists because the VAT was once hardcoded in two
@@ -58,5 +58,27 @@ describe('taxLabel y taxHint', () => {
     expect(taxLabel('21')).toBe('IVA (21%)')
     expect(taxHint(10)).toMatch(/vivienda/)
     expect(taxHint(0)).toMatch(/sin IVA/i)
+  })
+})
+
+describe('combinedTotals', () => {
+  it('suma un presupuesto y sus modificaciones, cada uno con su IVA', () => {
+    const total = combinedTotals([
+      { subtotal_amount: 100, tax_rate: 21 },
+      { subtotal_amount: 50, tax_rate: 21 },
+    ])
+    expect(total).toEqual({ subtotal: 150, tax: 31.5, total: 181.5 })
+  })
+
+  it('una modificación con líneas negativas (trabajos retirados) resta del total', () => {
+    const total = combinedTotals([
+      { subtotal_amount: 1000, tax_rate: 10 },
+      { subtotal_amount: -200, tax_rate: 10 },
+    ])
+    expect(total.total).toBe(880)
+  })
+
+  it('sin documentos es cero', () => {
+    expect(combinedTotals([])).toEqual({ subtotal: 0, tax: 0, total: 0 })
   })
 })

@@ -11,11 +11,14 @@ export default function EstimatePDFPreview({
   estimate,
   rows,
   company,
+  parentDateLabel,
   onClose,
 }: {
   estimate: Estimate;
   rows: EstimateRow[];
   company: CompanyProfile | null;
+  /** When this is a Modificación: the date of the original budget, for the heading. */
+  parentDateLabel?: string | null;
   onClose: () => void;
 }) {
   const [emailTo, setEmailTo] = useState('');
@@ -157,6 +160,14 @@ export default function EstimatePDFPreview({
             </div>
           </div>
         </div>
+
+        {estimate.kind === 'modificacion' && (
+          <div className="px-6 sm:px-10 md:px-12 pb-2">
+            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-4 py-2.5 text-sm font-bold">
+              Modificación del presupuesto{parentDateLabel ? ` del ${parentDateLabel}` : ''}
+            </div>
+          </div>
+        )}
 
         {/* Content Table */}
         <div className="px-6 sm:px-10 md:px-12 flex-grow">

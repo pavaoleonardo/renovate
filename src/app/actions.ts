@@ -1,6 +1,6 @@
 'use server'
 
-import { Estimate, EstimateRow, CatalogService, CatalogPhase, CompanyProfile, LabourCategory, PriceSourceKind } from '@/types';
+import { Estimate, EstimateRow, CatalogService, CatalogPhase, CompanyProfile, LabourCategory, PriceSourceKind, PendingNote, PendingNoteStatus } from '@/types';
 import { DEFAULT_CATALOG } from '@/lib/default-catalog';
 import { IMPORT_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai';
 import { catalogKey } from '@/lib/catalog-key';
@@ -161,11 +161,29 @@ export async function saveEstimateRows(estimateId: string, rows: EstimateRow[]) 
   // whole layout by id and then prune only what the user actually removed. This
   // replaces an older "delete everything, then insert": if that write failed or
   // the connection dropped, it silently wiped the lines already saved.
-  const rowsToUpsert = processedRows.map(r => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { created_at, ...rest } = r as EstimateRow & { created_at?: string };
-    return rest;
-  });
+  // Row ids are generated client-side (crypto.randomUUID), so we can upsert the
+  // whole layout by id and then prune only what the user actually removed. This
+  // replaces an older "delete everything, then insert": if that write failed or
+  // the connection dropped, it silently wiped the lines already saved.
+  //
+  // Only columns that really exist on estimate_rows are sent. Spreading the whole
+  // row object used to push fields the table did not know (the client_note the
+  // editor filled in) and Postgres rejected the *entire* upsert with "column
+  // client_note does not exist" — the budget never saved and nobody was told. An
+  // allow-list stops any future extra field from doing the same.
+  const rowsToUpsert = processedRows.map(r => ({
+    id: r.id,
+    estimate_id: r.estimate_id,
+    type: r.type,
+    position: r.position,
+    phase_name_snapshot: r.phase_name_snapshot ?? null,
+    service_name_snapshot: r.service_name_snapshot ?? null,
+    unit_snapshot: r.unit_snapshot ?? null,
+    price_snapshot: r.price_snapshot ?? null,
+    client_note: r.client_note ?? null,
+    quantity: r.quantity ?? 0,
+    total: r.total ?? 0,
+  }));
 
   // 1. Store the new/updated lines first (idempotent thanks to onConflict: 'id').
   const { error: upsertError } = await supabase
@@ -174,7 +192,7 @@ export async function saveEstimateRows(estimateId: string, rows: EstimateRow[]) 
 
   if (upsertError) {
     console.error('Error saving rows', upsertError);
-    return { success: false, subtotal: 0, totalWithTax: 0 };
+    return { success: false, error: upsertError.message, subtotal: 0, totalWithTax: 0 };
   }
 
   // 2. Remove the lines the user deleted — only after the rest is safely stored,
@@ -199,15 +217,31 @@ export async function saveEstimateRows(estimateId: string, rows: EstimateRow[]) 
     .update({ subtotal_amount: totals.subtotal, total_amount: totals.total })
     .eq('id', estimateId);
 
-  return { success: true, subtotal: totals.subtotal, totalWithTax: totals.total };
+  return { success: true, error: null, subtotal: totals.subtotal, totalWithTax: totals.total };
 }
 
 export async function updateEstimateStatus(estimateId: string, status: Estimate['status']) {
   const supabase = createClient();
   
+  const update: Record<string, unknown> = { status };
+
+  // Freeze what the client accepted: turning a budget into "Aceptado" records the
+  // figures it was approved with, so a later edit to the lines cannot rewrite them.
+  if (status === 'approved') {
+    const { data: current } = await supabase
+      .from('estimates')
+      .select('status, subtotal_amount, total_amount')
+      .eq('id', estimateId)
+      .single();
+    if (current && current.status !== 'approved') {
+      update.approved_subtotal = current.subtotal_amount ?? 0;
+      update.approved_total = current.total_amount ?? 0;
+    }
+  }
+
   const { data, error } = await supabase
     .from('estimates')
-    .update({ status })
+    .update(update)
     .eq('id', estimateId)
     .select()
     .single();
@@ -215,6 +249,56 @@ export async function updateEstimateStatus(estimateId: string, status: Estimate[
   if (error) throw new Error(error.message);
   
   return { success: true, estimate: data as Estimate };
+}
+
+/**
+ * Creates a "Modificación": an addendum budget that hangs from a principal one.
+ * It copies the client, address, VAT and warranty so the user only has to add the
+ * extra lines — and, with a negative price, the removed work.
+ */
+export async function createModificacion(parentEstimateId: string) {
+  const supabase = createClient();
+
+  const { data: parent, error: parentError } = await supabase
+    .from('estimates')
+    .select('company_id, client_name, property_address, tax_rate, warranty_months')
+    .eq('id', parentEstimateId)
+    .single();
+
+  if (parentError || !parent) throw new Error('No se encontró el presupuesto original.');
+
+  const { data, error } = await supabase
+    .from('estimates')
+    .insert({
+      company_id: parent.company_id,
+      client_name: parent.client_name,
+      property_address: parent.property_address,
+      status: 'draft',
+      subtotal_amount: 0,
+      total_amount: 0,
+      tax_rate: parent.tax_rate,
+      warranty_months: parent.warranty_months,
+      kind: 'modificacion',
+      parent_estimate_id: parentEstimateId,
+    })
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath('/estimates');
+  return data as Estimate;
+}
+
+/** Minimal parent header (for the "Modificación del presupuesto del…" heading). */
+export async function getParentEstimate(parentId: string) {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from('estimates')
+    .select('id, client_name, created_at')
+    .eq('id', parentId)
+    .single();
+  return (data as { id: string; client_name: string; created_at?: string } | null);
 }
 
 /**
@@ -256,6 +340,109 @@ export async function updateEstimateTaxRate(estimateId: string, taxRate: number)
   revalidatePath(`/estimates/${estimateId}`);
 
   return { success: true, estimate: data as Estimate };
+}
+
+/**
+ * ── Cambios de esta obra (pending notes) ──────────────────────────────────────
+ * Captured changes that are NOT part of the budget yet. They stay internal until
+ * the user converts one into a line; nothing here is ever printed on the client
+ * PDF. Scoped to the company through the estimate that owns them (RLS), like
+ * estimate_rows.
+ */
+
+export async function getPendingNotes(estimateId: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('estimate_pending_notes')
+    .select('*')
+    .eq('estimate_id', estimateId)
+    .eq('status', 'open')
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('Error loading pending notes', error);
+    return { data: [] as PendingNote[] };
+  }
+  return { data: (data || []) as PendingNote[] };
+}
+
+export async function addPendingNote(
+  estimateId: string,
+  text: string,
+  hint: { section?: string | null; quantity?: number | null; price?: number | null } = {}
+) {
+  const clean = (text || '').trim();
+  if (!clean) return { success: false as const, error: 'La nota está vacía.' };
+
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('estimate_pending_notes')
+    .insert({
+      estimate_id: estimateId,
+      text: clean,
+      section: hint.section ?? null,
+      quantity: hint.quantity ?? null,
+      price: hint.price ?? null,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error adding pending note', error);
+    return { success: false as const, error: error.message };
+  }
+
+  revalidatePath('/estimates');
+  return { success: true as const, note: data as PendingNote };
+}
+
+/**
+ * Marks a note resolved. The line itself is created client-side (so it can be
+ * reviewed and saved with the rest of the budget) — this only records what the
+ * user did with the note.
+ */
+async function setPendingNoteStatus(noteId: string, status: PendingNoteStatus) {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('estimate_pending_notes')
+    .update({ status, resolved_at: new Date().toISOString() })
+    .eq('id', noteId);
+
+  if (error) {
+    console.error('Error resolving pending note', error);
+    return { success: false as const, error: error.message };
+  }
+
+  revalidatePath('/estimates');
+  return { success: true as const };
+}
+
+export async function convertPendingNote(noteId: string) {
+  return setPendingNoteStatus(noteId, 'converted');
+}
+
+export async function dismissPendingNote(noteId: string) {
+  return setPendingNoteStatus(noteId, 'dismissed');
+}
+
+/** How many open notes each estimate has, for the badge on /estimates. */
+export async function getPendingCounts(): Promise<Record<string, number>> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('estimate_pending_notes')
+    .select('estimate_id')
+    .eq('status', 'open');
+
+  if (error) {
+    console.error('Error counting pending notes', error);
+    return {};
+  }
+
+  const counts: Record<string, number> = {};
+  for (const row of (data || []) as { estimate_id: string }[]) {
+    counts[row.estimate_id] = (counts[row.estimate_id] || 0) + 1;
+  }
+  return counts;
 }
 
 export async function searchCatalog(): Promise<CatalogService[]> {

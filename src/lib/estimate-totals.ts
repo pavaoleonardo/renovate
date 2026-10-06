@@ -66,3 +66,38 @@ export function taxHint(taxRate: unknown): string {
   const rate = normalizeTaxRate(taxRate);
   return TAX_RATE_OPTIONS.find((option) => option.value === rate)?.hint || '';
 }
+
+/** The money columns of a stored estimate, as far as the totals are concerned. */
+export interface EstimateMoney {
+  /** Base imponible (VAT excluded). */
+  subtotal_amount?: number | null;
+  /** Base + VAT; the fallback when a row predates the tax migration. */
+  total_amount?: number | null;
+  tax_rate?: unknown;
+}
+
+export interface CombinedTotals {
+  subtotal: number;
+  tax: number;
+  total: number;
+}
+
+/**
+ * Adds up a principal budget and its modifications. Each document is taxed with
+ * its own rate, so the sum runs over their computed totals — never over the
+ * un-taxed bases. /estimates shows the result as "12.400 € + 850 €".
+ */
+export function combinedTotals(estimates: EstimateMoney[]): CombinedTotals {
+  return estimates.reduce<CombinedTotals>(
+    (acc, e) => {
+      const base = Number(e.subtotal_amount ?? e.total_amount ?? 0) || 0;
+      const t = computeTotals(base, e.tax_rate);
+      return {
+        subtotal: round2(acc.subtotal + t.subtotal),
+        tax: round2(acc.tax + t.tax),
+        total: round2(acc.total + t.total),
+      };
+    },
+    { subtotal: 0, tax: 0, total: 0 }
+  );
+}

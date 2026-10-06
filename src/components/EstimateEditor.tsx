@@ -1,12 +1,19 @@
 "use client";
 
-import { useState, useMemo, useRef } from 'react';
-import { Estimate, EstimateRow, CatalogService, EstimateStatus, CompanyProfile } from '@/types';
-import { saveEstimateRows, updateEstimateStatus, updateEstimateInfo, updateEstimateTaxRate } from '@/app/actions';
+import { useState, useMemo, useRef, useEffect } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { Estimate, EstimateRow, CatalogService, EstimateStatus, CompanyProfile, PendingNote, VoiceProposalLine } from '@/types';
+import { saveEstimateRows, updateEstimateStatus, updateEstimateInfo, updateEstimateTaxRate, addPendingNote, convertPendingNote, dismissPendingNote, createModificacion } from '@/app/actions';
 import { Plus, GripVertical, Trash2, Printer, CheckCircle2, ChevronUp, ChevronDown, Sparkles } from 'lucide-react';
 import { computeTotals, normalizeTaxRate, taxHint, taxLabel, TAX_RATE_OPTIONS } from '@/lib/estimate-totals';
 import { catalogKey } from '@/lib/catalog-key';
 import EstimatePDFPreview from './EstimatePDFPreview';
+import AutoGrowTextarea from './AutoGrowTextarea';
+import PendingNotesPanel from './PendingNotesPanel';
+import VoiceChangeCapture from './VoiceChangeCapture';
+import { pendingToRow } from '@/lib/pending-notes';
+import { proposalLineToRow } from '@/lib/voice-change';
 
 /**
  * "+ Añadir Sección..." control. Shared by the empty state (a brand-new budget,
@@ -52,15 +59,23 @@ export default function EstimateEditor({
   initialEstimate, 
   initialRows, 
   catalog,
-  company
+  company,
+  initialPendingNotes = [],
+  parentEstimate = null
 }: { 
   initialEstimate: Estimate; 
   initialRows: EstimateRow[]; 
   catalog: CatalogService[];
   company: CompanyProfile | null;
+  initialPendingNotes?: PendingNote[];
+  /** For a Modificación: the original budget, for the heading and the link back. */
+  parentEstimate?: { client_name: string; created_at?: string } | null;
 }) {
   const [estimate, setEstimate] = useState(initialEstimate);
   const [rows, setRows] = useState(initialRows || []);
+  const [pendingNotes, setPendingNotes] = useState<PendingNote[]>(initialPendingNotes || []);
+  const [isCreatingMod, setIsCreatingMod] = useState(false);
+  const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -71,7 +86,26 @@ export default function EstimateEditor({
   const [translateError, setTranslateError] = useState<string | null>(null);
   const [taxError, setTaxError] = useState<string | null>(null);
   const [isSavingTax, setIsSavingTax] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const dragNode = useRef<HTMLDivElement | null>(dragNode_);
+
+  // What "saved" means for the unsaved-changes indicator: the last layout the
+  // server confirmed. Any edit to `rows` that no longer matches it is unsaved.
+  const savedRowsJson = useRef<string>(JSON.stringify(initialRows || []));
+  const isDirty = useMemo(() => JSON.stringify(rows) !== savedRowsJson.current, [rows]);
+
+  // Warn before leaving with unsaved lines — closing the tab used to lose the
+  // whole budget silently.
+  useEffect(() => {
+    if (!isDirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [isDirty]);
 
   // Totals recalc
   const calcRowTotal = (r: EstimateRow) => (r.price_snapshot || 0) * (r.quantity || 0);
@@ -111,6 +145,12 @@ export default function EstimateEditor({
    */
   const isBlankBudget = rows.length === 0;
   const hasSection = useMemo(() => rows.some(r => r.type === 'phase'), [rows]);
+
+  /** Existing section names, offered to the AI so it reuses one when it fits. */
+  const sections = useMemo(
+    () => rows.filter(r => r.type === 'phase' && r.phase_name_snapshot).map(r => r.phase_name_snapshot as string),
+    [rows]
+  );
 
   const addPhase = (name?: string) => {
     setRows([...rows, {
@@ -191,8 +231,64 @@ export default function EstimateEditor({
 
   const handleSave = async () => {
     setIsSaving(true);
-    await saveEstimateRows(estimate.id, rows);
-    setIsSaving(false);
+    setSaveError(null);
+    try {
+      const res = await saveEstimateRows(estimate.id, rows);
+      if (!res.success) {
+        // A failed upsert (a missing column, a dropped connection…) must be seen,
+        // not swallowed: the user has to know the budget did not reach the server.
+        setSaveError(res.error || 'No se pudo guardar. Inténtalo de nuevo.');
+        return;
+      }
+      savedRowsJson.current = JSON.stringify(rows);
+      setSavedAt(Date.now());
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Error de conexión al guardar.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleAddPending = async (
+    text: string,
+    hint: { section?: string | null; quantity?: number | null; price?: number | null } = {}
+  ) => {
+    const res = await addPendingNote(estimate.id, text, hint);
+    if (res.success && res.note) setPendingNotes(prev => [...prev, res.note as PendingNote]);
+  };
+
+  // The lines the AI proposed from a dictation, appended to the budget (unsaved,
+  // so the user reviews them) under the section they picked.
+  const handleAddVoiceLines = (lines: VoiceProposalLine[], section: string | null) => {
+    setRows(prev => [
+      ...prev,
+      ...lines.map((line, i) => proposalLineToRow(line, section, crypto.randomUUID(), prev.length + i)),
+    ]);
+  };
+
+  // Converting adds the line to the budget (unsaved, so the user reviews it) and
+  // records on the server that the note was used.
+  const handleConvertPending = async (note: PendingNote) => {
+    setRows(prev => [...prev, pendingToRow(note, crypto.randomUUID())]);
+    setPendingNotes(prev => prev.filter(n => n.id !== note.id));
+    await convertPendingNote(note.id);
+  };
+
+  const handleDismissPending = async (note: PendingNote) => {
+    setPendingNotes(prev => prev.filter(n => n.id !== note.id));
+    await dismissPendingNote(note.id);
+  };
+
+  // "Añadir trabajos adicionales": creates the addendum and jumps into its editor.
+  const handleAddModificacion = async () => {
+    setIsCreatingMod(true);
+    try {
+      const mod = await createModificacion(estimate.id);
+      router.push(`/estimates/${mod.id}`);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'No se pudo crear la modificación.');
+      setIsCreatingMod(false);
+    }
   };
 
   const handleTranslateForClient = async () => {
@@ -357,8 +453,43 @@ export default function EstimateEditor({
             >
               <Printer size={18} /> Exportar PDF
             </button>
+
+            {estimate.kind !== 'modificacion' && (
+              <button
+                onClick={handleAddModificacion}
+                disabled={isCreatingMod}
+                className="flex items-center gap-2 text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-4 py-2 rounded-lg transition font-semibold text-sm w-full md:w-auto justify-center disabled:opacity-50"
+              >
+                <Plus size={18} /> {isCreatingMod ? 'Creando…' : 'Añadir trabajos adicionales'}
+              </button>
+            )}
           </div>
         </div>
+
+        {estimate.kind === 'modificacion' && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-amber-900 text-sm font-bold">
+            <Plus size={16} />
+            Modificación{parentEstimate ? ` de ${parentEstimate.client_name}` : ''}
+            {estimate.parent_estimate_id && (
+              <Link href={`/estimates/${estimate.parent_estimate_id}`} className="ml-auto text-amber-700 underline hover:no-underline">
+                Ver presupuesto original
+              </Link>
+            )}
+          </div>
+        )}
+
+        <VoiceChangeCapture
+          sections={sections}
+          onAddNote={handleAddPending}
+          onAddLines={handleAddVoiceLines}
+        />
+
+        <PendingNotesPanel
+          notes={pendingNotes}
+          onAdd={handleAddPending}
+          onConvert={handleConvertPending}
+          onDismiss={handleDismissPending}
+        />
 
         {/* DOCUMENT ROWS */}
         <div className="bg-white rounded-xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 overflow-hidden">
@@ -471,18 +602,7 @@ export default function EstimateEditor({
                         onChange={(e) => updateRow(row.id, { service_name_snapshot: e.target.value })}
                         placeholder="Descripción del ítem..."
                       />
-                      <textarea
-                        className="text-xs text-zinc-500 bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-300 focus:ring-1 focus:ring-blue-100 rounded-md px-2 py-1 placeholder:text-zinc-300 transition w-full resize-none mt-0.5 leading-relaxed"
-                        rows={1}
-                        value={row.client_note || ''}
-                        onChange={(e) => updateRow(row.id, { client_note: e.target.value })}
-                        placeholder="Nota para el cliente (opcional)..."
-                        onInput={(e) => {
-                          const t = e.target as HTMLTextAreaElement;
-                          t.style.height = 'auto';
-                          t.style.height = t.scrollHeight + 'px';
-                        }}
-                      />
+                      {/* The client note lives in its own full-width row below (9th grid cell). */}
                    </div>
                     <div className="flex flex-col gap-1 min-w-0">
                     <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Catálogo</label>
@@ -555,6 +675,17 @@ export default function EstimateEditor({
                     </div>
                     </div>
                     <button onClick={() => removeRow(row.id)} className="text-zinc-300 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition flex justify-center items-center"><Trash2 size={16} /></button>
+                    {/* 9th cell: the client note, a full-width row of its own (md). It grows with
+                        the text, so a long AI-generated paragraph is readable without clipping. */}
+                    <div className="col-span-2 md:col-span-full md:pl-[42px]">
+                      <AutoGrowTextarea
+                        className="text-xs text-zinc-500 bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-300 focus:ring-1 focus:ring-blue-100 rounded-md px-2 py-1 placeholder:text-zinc-300 transition w-full resize-none leading-relaxed"
+                        value={row.client_note || ''}
+                        onChange={(value) => updateRow(row.id, { client_note: value })}
+                        placeholder="Nota para el cliente (opcional)…"
+                        minRows={2}
+                      />
+                    </div>
                 </div>
               );
             })}
@@ -600,7 +731,7 @@ export default function EstimateEditor({
 
         {/* STICKY ACTION BAR */}
         <div className="fixed bottom-4 md:bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-shell bg-white border border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-3 px-4 md:p-4 md:px-8 flex flex-col md:flex-row md:justify-between md:items-center gap-3 rounded-2xl z-50 print:hidden">
-          <div className="w-full md:w-auto">
+          <div className="w-full md:w-auto flex flex-col gap-1.5">
             <button 
               onClick={handleSave} 
               disabled={isSaving}
@@ -608,6 +739,13 @@ export default function EstimateEditor({
             >
              {isSaving ? 'Guardando...' : 'Guardar Presupuesto'}
             </button>
+            {saveError ? (
+              <p className="text-[11px] text-red-500 font-bold text-center md:text-left">{saveError}</p>
+            ) : isDirty ? (
+              <p className="text-[11px] text-amber-600 font-bold text-center md:text-left">• Cambios sin guardar</p>
+            ) : savedAt ? (
+              <p className="text-[11px] text-green-600 font-bold text-center md:text-left">✓ Guardado</p>
+            ) : null}
           </div>
           <div className="flex w-full md:w-auto items-center justify-between md:justify-end gap-4 md:gap-8">
             <div className="hidden md:block text-zinc-500 text-sm font-bold">Líneas: {rows?.length || 0}</div>
@@ -641,6 +779,7 @@ export default function EstimateEditor({
           estimate={estimate}
           rows={rows}
           company={company}
+          parentDateLabel={parentEstimate?.created_at ? new Date(parentEstimate.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' }) : null}
           onClose={() => setShowPreview(false)}
         />
       )}
