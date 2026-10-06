@@ -84,9 +84,21 @@ export default function EstimatePDFPreview({
     URL.revokeObjectURL(url);
   };
 
-  /** True when this browser can hand a PDF file to the OS share sheet. */
+  /**
+   * True when handing the PDF to the OS share sheet is worthwhile. Only phones
+   * and tablets benefit: there the sheet lists WhatsApp / Mail and attaches the
+   * file automatically. On desktop the system sheet usually has no WhatsApp and
+   * swallows the click — the mail draft or WhatsApp Web never opens — so we skip
+   * it and fall back to downloading the PDF and opening the deep link.
+   */
   const canSharePdf = (): boolean => {
-    if (typeof navigator.canShare !== 'function') return false;
+    if (typeof navigator === 'undefined' || typeof navigator.canShare !== 'function') return false;
+    const ua = navigator.userAgent || '';
+    // iPadOS 13+ reports as a Mac; its touch support gives it away.
+    const isMobile =
+      /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
+      (navigator.maxTouchPoints > 1 && /Macintosh/.test(ua));
+    if (!isMobile) return false;
     try {
       return navigator.canShare({ files: [new File([new Blob()], pdfFileName, { type: 'application/pdf' })] });
     } catch {
