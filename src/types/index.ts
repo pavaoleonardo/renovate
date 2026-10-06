@@ -70,6 +70,12 @@ export interface VoiceProposalLine {
   description: string;
   quantity: number;
   unit: string;
+  /**
+   * Existing budget line this change attaches to, copied verbatim (e.g. "Bañera blanca
+   * 170 cm"). The new line is placed just below it. `null` when it relates to none — the
+   * line then lands in its section or, with no hint at all, at the end of the budget.
+   */
+  anchor?: string | null;
 }
 
 /**

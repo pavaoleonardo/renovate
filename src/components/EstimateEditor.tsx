@@ -13,7 +13,8 @@ import AutoGrowTextarea from './AutoGrowTextarea';
 import PendingNotesPanel from './PendingNotesPanel';
 import VoiceChangeCapture from './VoiceChangeCapture';
 import { pendingToRow } from '@/lib/pending-notes';
-import { proposalLineToRow } from '@/lib/voice-change';
+import { proposalLineToRow, voiceInsertionIndex } from '@/lib/voice-change';
+import type { VoiceOutlineSection, VoiceCatalogEntry } from '@/lib/voice-change';
 
 /**
  * "+ Añadir Sección..." control. Shared by the empty state (a brand-new budget,
@@ -146,10 +147,29 @@ export default function EstimateEditor({
   const isBlankBudget = rows.length === 0;
   const hasSection = useMemo(() => rows.some(r => r.type === 'phase'), [rows]);
 
-  /** Existing section names, offered to the AI so it reuses one when it fits. */
-  const sections = useMemo(
-    () => rows.filter(r => r.type === 'phase' && r.phase_name_snapshot).map(r => r.phase_name_snapshot as string),
-    [rows]
+  /**
+   * El presupuesto como contexto para la IA: cada sección con las descripciones de sus
+   * líneas. Son las candidatas a `anchor`, para que un cambio dictado se pegue al
+   * servicio al que se refiere en vez de caer al final del presupuesto.
+   */
+  const voiceOutline = useMemo<VoiceOutlineSection[]>(() => {
+    const out: VoiceOutlineSection[] = [];
+    let current: VoiceOutlineSection | null = null;
+    for (const r of rows) {
+      if (r.type === 'phase') {
+        current = { section: r.phase_name_snapshot || '', lines: [] };
+        out.push(current);
+      } else if (r.type === 'item' && current && r.service_name_snapshot) {
+        current.lines.push(r.service_name_snapshot);
+      }
+    }
+    return out.filter(s => s.section);
+  }, [rows]);
+
+  /** El catálogo de la empresa recortado (sin precios), para que la IA reconozca el servicio. */
+  const voiceCatalog = useMemo<VoiceCatalogEntry[]>(
+    () => (catalog || []).map(s => ({ name: s.name, unit: s.unit, section: s.phase_name ?? null })),
+    [catalog]
   );
 
   const addPhase = (name?: string) => {
@@ -257,13 +277,19 @@ export default function EstimateEditor({
     if (res.success && res.note) setPendingNotes(prev => [...prev, res.note as PendingNote]);
   };
 
-  // The lines the AI proposed from a dictation, appended to the budget (unsaved,
-  // so the user reviews them) under the section they picked.
+  // The lines the AI proposed from a dictation (unsaved, so the user reviews them).
+  // Each one is placed next to the service it refers to —just below its `anchor`
+  // line— or, failing that, at the end of its section; only with no hint at all does
+  // it fall to the end of the budget, which is what used to always happen.
   const handleAddVoiceLines = (lines: VoiceProposalLine[], section: string | null) => {
-    setRows(prev => [
-      ...prev,
-      ...lines.map((line, i) => proposalLineToRow(line, section, crypto.randomUUID(), prev.length + i)),
-    ]);
+    setRows(prev => {
+      const next = [...prev];
+      for (const line of lines) {
+        const at = voiceInsertionIndex(next, section, line.anchor ?? null);
+        next.splice(at, 0, proposalLineToRow(line, section, crypto.randomUUID(), at));
+      }
+      return next;
+    });
   };
 
   // Converting adds the line to the budget (unsaved, so the user reviews it) and
@@ -479,7 +505,8 @@ export default function EstimateEditor({
         )}
 
         <VoiceChangeCapture
-          sections={sections}
+          outline={voiceOutline}
+          catalog={voiceCatalog}
           onAddNote={handleAddPending}
           onAddLines={handleAddVoiceLines}
         />

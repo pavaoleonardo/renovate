@@ -1,29 +1,34 @@
 "use client";
 
 import { useState } from 'react';
-import { Sparkles, Plus, Trash2, Save } from 'lucide-react';
+import { Sparkles, Plus, Trash2, Save, CornerDownRight } from 'lucide-react';
 import { VoiceProposalLine } from '@/types';
+import type { VoiceOutlineSection, VoiceCatalogEntry } from '@/lib/voice-change';
 import { appendTranscript } from '@/lib/speech';
 import VoiceButton from './VoiceButton';
 
 /**
  * «Dictar un cambio»: el flujo voz → texto → propuesta.
  *
- * El dictado ocurre en el navegador (el audio no sale del dispositivo). El texto
- * se le manda a la IA, que devuelve un resumen y unas líneas propuestas; aquí el
- * usuario lo revisa y decide: guardarlo como cambio pendiente («Cambios de esta
- * obra») o añadir las líneas al presupuesto. Nada entra en el presupuesto sin
- * pasar por esta pantalla.
+ * El dictado ocurre en el navegador (el audio no sale del dispositivo). El texto se
+ * le manda a la IA junto al presupuesto actual (secciones y sus líneas) y al
+ * catálogo de la empresa, para que el cambio se pegue al servicio al que se refiere
+ * en lugar de caer al final. Aquí el usuario lo revisa y decide: guardarlo como
+ * cambio pendiente («Cambios de esta obra») o añadir las líneas al presupuesto.
+ * Nada entra en el presupuesto sin pasar por esta pantalla.
  */
 export default function VoiceChangeCapture({
-  sections,
+  outline,
+  catalog,
   onAddNote,
   onAddLines,
 }: {
-  sections: string[];
+  outline: VoiceOutlineSection[];
+  catalog: VoiceCatalogEntry[];
   onAddNote: (text: string, hint?: { section?: string | null; quantity?: number | null }) => void | Promise<void>;
   onAddLines: (lines: VoiceProposalLine[], section: string | null) => void;
 }) {
+  const sections = outline.map((s) => s.section);
   const [text, setText] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +54,7 @@ export default function VoiceChangeCapture({
       const res = await fetch('/api/voice-change', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript, sections }),
+        body: JSON.stringify({ transcript, outline, catalog }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -167,28 +172,35 @@ export default function VoiceChangeCapture({
               <label className="block text-[11px] font-bold uppercase tracking-wide text-zinc-400 mb-1">Líneas propuestas</label>
               <ul className="flex flex-col gap-2">
                 {lines.map((line, i) => (
-                  <li key={i} className="flex items-center gap-2">
-                    <input
-                      value={line.description}
-                      onChange={(e) => updateLine(i, { description: e.target.value })}
-                      className="flex-1 px-2 py-1.5 rounded-md border border-zinc-200 text-sm text-zinc-800"
-                    />
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={line.quantity}
-                      onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
-                      className="w-16 px-2 py-1.5 rounded-md border border-zinc-200 text-sm text-zinc-800 text-right tabular-nums"
-                    />
-                    <input
-                      value={line.unit}
-                      onChange={(e) => updateLine(i, { unit: e.target.value })}
-                      className="w-14 px-2 py-1.5 rounded-md border border-zinc-200 text-sm text-zinc-800"
-                    />
-                    <button type="button" onClick={() => removeLine(i)} className="p-1 text-zinc-400 hover:text-red-500 transition">
-                      <Trash2 size={15} />
-                    </button>
+                  <li key={i} className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={line.description}
+                        onChange={(e) => updateLine(i, { description: e.target.value })}
+                        className="flex-1 px-2 py-1.5 rounded-md border border-zinc-200 text-sm text-zinc-800"
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={line.quantity}
+                        onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
+                        className="w-16 px-2 py-1.5 rounded-md border border-zinc-200 text-sm text-zinc-800 text-right tabular-nums"
+                      />
+                      <input
+                        value={line.unit}
+                        onChange={(e) => updateLine(i, { unit: e.target.value })}
+                        className="w-14 px-2 py-1.5 rounded-md border border-zinc-200 text-sm text-zinc-800"
+                      />
+                      <button type="button" onClick={() => removeLine(i)} className="p-1 text-zinc-400 hover:text-red-500 transition">
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                    {line.anchor && (
+                      <span className="flex items-center gap-1 text-[11px] text-zinc-500 font-medium pl-1">
+                        <CornerDownRight size={12} /> se colocará bajo «{line.anchor}»
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
