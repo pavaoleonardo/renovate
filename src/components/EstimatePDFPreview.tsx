@@ -2,8 +2,8 @@
 
 import { Estimate, EstimateRow, CompanyProfile } from '@/types';
 import { computeTotals } from '@/lib/estimate-totals';
-import { X, Printer, Mail } from 'lucide-react';
-import { useState } from 'react';
+import { X, Printer, Mail, Download, MessageCircle } from 'lucide-react';
+import { useRef, useState } from 'react';
 
 const fmt = (n: number) => n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 
@@ -21,10 +21,15 @@ export default function EstimatePDFPreview({
   parentDateLabel?: string | null;
   onClose: () => void;
 }) {
+  const docRef = useRef<HTMLDivElement>(null);
+
   const [emailTo, setEmailTo] = useState('');
+  const [whatsappTo, setWhatsappTo] = useState('');
   const [showEmailForm, setShowEmailForm] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [emailSent, setEmailSent] = useState(false);
+  const [showWhatsappForm, setShowWhatsappForm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [hint, setHint] = useState('');
 
   const subtotal = rows.reduce((acc, r) => {
     if (r.type === 'item') return acc + (r.price_snapshot || 0) * (r.quantity || 0);
@@ -33,6 +38,9 @@ export default function EstimatePDFPreview({
   // The VAT is whatever this budget was issued with: 21 %, 10 % or none at all.
   const totals = computeTotals(subtotal, estimate.tax_rate);
   const vatIncluded = totals.taxRate > 0;
+
+  /** File name used for the downloaded / shared PDF (strips characters illegal on disk). */
+  const pdfFileName = `Presupuesto - ${(estimate.client_name || 'cliente').replace(/[/\\?%*:|"<>]+/g, '').trim() || 'cliente'}.pdf`;
 
   const today = new Date().toLocaleDateString('es-ES', {
     day: '2-digit',
@@ -44,17 +52,137 @@ export default function EstimatePDFPreview({
     window.print();
   };
 
+  /**
+   * Renders the on-screen document into a real PDF file. html2pdf.js is imported
+   * lazily inside this handler so it never lands in the editor's initial bundle
+   * (the PDF engine loads only when the user asks to download or send).
+   */
+  const buildPdfBlob = async (): Promise<Blob> => {
+    const node = docRef.current;
+    if (!node) throw new Error('No se encontró el documento');
+    const { default: html2pdf } = await import('html2pdf.js');
+    const options = {
+      margin: [8, 8, 8, 8] as [number, number, number, number],
+      filename: pdfFileName,
+      image: { type: 'jpeg' as const, quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
+      pagebreak: { mode: ['css', 'legacy'] },
+    };
+    const blob = await html2pdf().set(options).from(node).outputPdf('blob');
+    return blob as Blob;
+  };
+
+  const downloadBlob = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = pdfFileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  /** True when this browser can hand a PDF file to the OS share sheet. */
+  const canSharePdf = (): boolean => {
+    if (typeof navigator.canShare !== 'function') return false;
+    try {
+      return navigator.canShare({ files: [new File([new Blob()], pdfFileName, { type: 'application/pdf' })] });
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * Hands the PDF to the device share sheet when the browser supports sharing
+   * files (mobile → WhatsApp, Mail, Drive…). Returns true when that path was
+   * taken — including when the user simply closed the sheet — so the caller
+   * knows whether it still needs the download fallback.
+   */
+  const sharePdfFile = async (blob: Blob, message: string): Promise<boolean> => {
+    if (canSharePdf()) {
+      const file = new File([blob], pdfFileName, { type: 'application/pdf' });
+      try {
+        await navigator.share({ files: [file], title: pdfFileName, text: message });
+        return true;
+      } catch (err) {
+        if ((err as DOMException)?.name === 'AbortError') return true; // user closed the sheet
+      }
+    }
+    return false;
+  };
+
+  const handleDownloadPdf = async () => {
+    if (generating) return;
+    setGenerating(true);
+    setHint('');
+    try {
+      downloadBlob(await buildPdfBlob());
+    } catch (err) {
+      console.error('No se pudo generar el PDF:', err);
+      setHint('No se pudo generar el PDF en este navegador. Prueba con «Imprimir → Guardar como PDF».');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  /**
+   * Email: a `mailto:` link cannot carry attachments, so we build the PDF first
+   * and hand it to the share sheet when possible. Otherwise we download it and
+   * open the mail draft, telling the user to attach the just-downloaded file.
+   */
   const handleSendEmail = async () => {
-    if (!emailTo) return;
-    setSending(true);
-    const subject = encodeURIComponent(`Presupuesto - ${estimate.client_name}`);
-    const body = encodeURIComponent(
-      `Estimado/a ${estimate.client_name},\n\nAdjunto le envío el presupuesto para la dirección: ${estimate.property_address}.\n\nImporte total ${vatIncluded ? '(IVA incluido)' : '(sin IVA)'}: ${fmt(totals.total)}\n\nQuedo a su disposición para cualquier consulta.\n\nUn saludo.`
-    );
-    window.open(`mailto:${emailTo}?subject=${subject}&body=${body}`, '_blank');
-    setSending(false);
-    setEmailSent(true);
-    setTimeout(() => setEmailSent(false), 3000);
+    if (!emailTo || busy) return;
+    setBusy(true);
+    setHint('');
+    try {
+      const subject = `Presupuesto - ${estimate.client_name}`;
+      const message = `Estimado/a ${estimate.client_name},\n\nLe envío el presupuesto para la dirección: ${estimate.property_address}.\n\nImporte total ${vatIncluded ? '(IVA incluido)' : '(sin IVA)'}: ${fmt(totals.total)}\n\nQuedo a su disposición para cualquier consulta.\n\nUn saludo.`;
+      const blob = await buildPdfBlob();
+      if (await sharePdfFile(blob, message)) return;
+      downloadBlob(blob);
+      window.location.href = `mailto:${emailTo}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`;
+      setHint('PDF descargado: adjúntalo al correo antes de enviarlo.');
+    } catch (err) {
+      console.error('No se pudo preparar el correo:', err);
+      setHint('No se pudo generar el PDF. Prueba con «Imprimir → Guardar como PDF».');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * WhatsApp: uses the share sheet when files can be shared (mobile). On desktop
+   * it downloads the PDF and opens WhatsApp Web with the message ready, so the
+   * user drags in the downloaded file. The blank tab is opened inside the click
+   * gesture so the popup blocker lets it through.
+   */
+  const handleSendWhatsapp = async () => {
+    if (busy) return;
+    setBusy(true);
+    setHint('');
+    const phone = whatsappTo.replace(/\D/g, '');
+    const message = `Hola ${estimate.client_name}, le envío el presupuesto para ${estimate.property_address}. Importe total ${vatIncluded ? '(IVA incluido)' : '(sin IVA)'}: ${fmt(totals.total)}.`;
+    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    const tab = canSharePdf() ? null : window.open('', '_blank');
+    try {
+      const blob = await buildPdfBlob();
+      if (await sharePdfFile(blob, message)) {
+        tab?.close();
+        return;
+      }
+      downloadBlob(blob);
+      if (tab) tab.location.href = waUrl;
+      else window.location.href = waUrl;
+      setHint('PDF descargado: adjúntalo en WhatsApp antes de enviar.');
+    } catch (err) {
+      tab?.close();
+      console.error('No se pudo preparar el WhatsApp:', err);
+      setHint('No se pudo generar el PDF. Prueba con «Imprimir → Guardar como PDF».');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -65,16 +193,29 @@ export default function EstimatePDFPreview({
           <h2 className="hidden sm:block font-bold text-zinc-900">Vista de Documento</h2>
           <div className="flex items-center gap-2 sm:gap-3 ml-auto">
             <button
-              onClick={() => setShowEmailForm(!showEmailForm)}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold transition text-sm"
+              onClick={() => { setShowEmailForm(!showEmailForm); setShowWhatsappForm(false); }}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-lg font-bold transition text-sm"
             >
-              <Mail size={16} /> Email
+              <Mail size={16} /> <span className="hidden sm:inline">Email</span>
+            </button>
+            <button
+              onClick={() => { setShowWhatsappForm(!showWhatsappForm); setShowEmailForm(false); }}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3 sm:px-4 py-2 rounded-lg font-bold transition text-sm"
+            >
+              <MessageCircle size={16} /> <span className="hidden sm:inline">WhatsApp</span>
+            </button>
+            <button
+              onClick={handleDownloadPdf}
+              disabled={generating}
+              className="flex items-center gap-2 bg-white border border-zinc-300 hover:bg-zinc-50 text-zinc-800 px-3 sm:px-4 py-2 rounded-lg font-bold transition text-sm disabled:opacity-50"
+            >
+              <Download size={16} /> <span className="hidden sm:inline">{generating ? 'Generando…' : 'PDF'}</span>
             </button>
             <button
               onClick={handlePrint}
-              className="flex items-center gap-2 bg-zinc-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold transition text-sm"
+              className="flex items-center gap-2 bg-zinc-900 hover:bg-black text-white px-3 sm:px-4 py-2 rounded-lg font-bold transition text-sm"
             >
-              <Printer size={16} /> Imprimir
+              <Printer size={16} /> <span className="hidden sm:inline">Imprimir</span>
             </button>
             <button
               onClick={onClose}
@@ -87,7 +228,7 @@ export default function EstimatePDFPreview({
 
         {showEmailForm && (
           <div className="border-t border-zinc-100 bg-zinc-50">
-            <div className="max-w-4xl mx-auto px-6 py-3 flex items-center gap-3">
+            <div className="max-w-4xl mx-auto px-6 py-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
               <input
                 type="email"
                 value={emailTo}
@@ -97,18 +238,41 @@ export default function EstimatePDFPreview({
               />
               <button
                 onClick={handleSendEmail}
-                disabled={!emailTo || sending}
-                className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold text-sm"
+                disabled={!emailTo || busy}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold text-sm disabled:opacity-50"
               >
-                {sending ? 'Env...' : emailSent ? '✓ Listo' : 'Enviar maillto'}
+                {busy ? 'Generando…' : 'Enviar por email'}
               </button>
             </div>
+            {hint && <p className="max-w-4xl mx-auto px-6 pb-3 text-[11px] font-medium text-zinc-500">{hint}</p>}
+          </div>
+        )}
+
+        {showWhatsappForm && (
+          <div className="border-t border-zinc-100 bg-zinc-50">
+            <div className="max-w-4xl mx-auto px-6 py-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <input
+                type="tel"
+                value={whatsappTo}
+                onChange={(e) => setWhatsappTo(e.target.value)}
+                placeholder="+34 600 000 000"
+                className="flex-1 px-4 py-2 rounded-lg border border-zinc-200 text-sm"
+              />
+              <button
+                onClick={handleSendWhatsapp}
+                disabled={busy}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg font-bold text-sm disabled:opacity-50"
+              >
+                {busy ? 'Generando…' : 'Enviar por WhatsApp'}
+              </button>
+            </div>
+            {hint && <p className="max-w-4xl mx-auto px-6 pb-3 text-[11px] font-medium text-zinc-500">{hint}</p>}
           </div>
         )}
       </div>
 
       {/* THE DOCUMENT PAPER */}
-      <div className="print-modal bg-white w-full max-w-4xl shadow-2xl rounded-sm mt-8 print:mt-0 overflow-hidden flex flex-col min-h-[29.7cm]">
+      <div ref={docRef} className="print-modal bg-white w-full max-w-4xl shadow-2xl rounded-sm mt-8 print:mt-0 overflow-hidden flex flex-col min-h-[29.7cm]">
         
         {/* Header - Corporate Style */}
         <div className="p-6 sm:p-10 md:p-12 pb-8">
