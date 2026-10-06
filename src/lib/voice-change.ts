@@ -1,4 +1,4 @@
-import { EstimateRow, VoiceProposal, VoiceProposalLine } from '@/types';
+import { CatalogService, EstimateRow, VoiceProposal, VoiceProposalLine } from '@/types';
 import { PRICE_TO_CONFIRM } from '@/lib/pending-notes';
 import { catalogKey } from '@/lib/catalog-key';
 
@@ -6,13 +6,24 @@ import { catalogKey } from '@/lib/catalog-key';
 export const VOICE_MAX_LINES = 20;
 
 /**
- * Una sección del presupuesto con las descripciones de sus líneas actuales. Es el
- * contexto que se le da a la IA para que el cambio dictado se pegue al servicio que ya
- * existe (el `anchor`) en lugar de caer al final del presupuesto.
+ * Una línea del presupuesto tal como se le enseña a la IA: su descripción y cuántas
+ * unidades hay. La cantidad es imprescindible para «déjalo en cinco»: sin ella la IA no
+ * puede calcular la cantidad final ni reconocer que el cambio va sobre una línea que ya
+ * existe.
+ */
+export interface VoiceOutlineLine {
+  description: string;
+  quantity: number;
+}
+
+/**
+ * Una sección del presupuesto con sus líneas actuales. Es el contexto que se le da a la
+ * IA para que el cambio dictado se pegue al servicio que ya existe (el `anchor`), sepa si
+ * modifica una línea o añade otra nueva, y en qué sección cae.
  */
 export interface VoiceOutlineSection {
   section: string;
-  lines: string[];
+  lines: VoiceOutlineLine[];
 }
 
 /** Partida del catálogo de la empresa, recortada para dársela a la IA (sin precios). */
@@ -34,11 +45,22 @@ function positiveNumber(value: unknown, fallback: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/** La IA sólo puede proponer tres operaciones; cualquier otra cae en 'add'. */
+function normalizeOp(value: unknown): VoiceProposalLine['op'] {
+  return value === 'update' || value === 'remove' ? value : 'add';
+}
+
+/** `source` sólo vale 'catalog' o 'new'; cualquier otra cosa (o ausente) es null. */
+function normalizeSource(value: unknown): VoiceProposalLine['source'] {
+  return value === 'catalog' || value === 'new' ? value : null;
+}
+
 /**
  * La respuesta de la IA es texto de fuera: hay que tratarla como tal. Sólo
  * sobrevive lo que tiene sentido —líneas con descripción, cantidad positiva,
- * unidad no vacía— y el número de líneas queda acotado. Así una respuesta rota
- * o exagerada no puede romper el editor ni inundar el presupuesto.
+ * unidad no vacía, una operación conocida— y el número de líneas queda acotado.
+ * Así una respuesta rota o exagerada no puede romper el editor ni inundar el
+ * presupuesto.
  */
 export function parseVoiceProposal(raw: unknown): VoiceProposal {
   const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
@@ -54,15 +76,29 @@ export function parseVoiceProposal(raw: unknown): VoiceProposal {
     if (!description) continue;
     const unit = typeof l.unit === 'string' && l.unit.trim() ? l.unit.trim() : 'ud';
     const anchor = typeof l.anchor === 'string' && l.anchor.trim() ? l.anchor.trim() : null;
-    lines.push({ description, quantity: positiveNumber(l.quantity, 1), unit, anchor });
+    lines.push({
+      op: normalizeOp(l.op),
+      description,
+      quantity: positiveNumber(l.quantity, 1),
+      unit,
+      anchor,
+      source: normalizeSource(l.source),
+    });
   }
 
   return { summary, section: sectionRaw || null, lines };
 }
 
+/** Cómo se ve una línea del presupuesto en el prompt: su descripción y su cantidad. */
+function lineText(line: VoiceOutlineLine): string {
+  const qty = Number.isFinite(line.quantity) && line.quantity > 0 ? line.quantity : 1;
+  return `${line.description} ×${qty}`;
+}
+
 /**
- * Cómo se le enseña a la IA el presupuesto actual: cada sección con las descripciones
- * de sus líneas, que son las candidatas a `anchor`.
+ * Cómo se le enseña a la IA el presupuesto actual: cada sección con sus líneas
+ * (descripción y cantidad). Esas descripciones son las candidatas a `anchor` y sus
+ * cantidades permiten calcular la cantidad final de un cambio.
  */
 function outlineText(outline: VoiceOutlineSection[]): string {
   if (outline.length === 0) return '(todavía no hay secciones)';
@@ -70,9 +106,9 @@ function outlineText(outline: VoiceOutlineSection[]): string {
     .filter((s) => s.section)
     .slice(0, PROMPT_MAX_SECTIONS)
     .map((s) => {
-      const lines = s.lines.filter(Boolean).slice(0, PROMPT_MAX_LINES_PER_SECTION);
+      const lines = s.lines.filter((l) => l.description).slice(0, PROMPT_MAX_LINES_PER_SECTION);
       return lines.length > 0
-        ? `- ${s.section}: ${lines.join(' · ')}`
+        ? `- ${s.section}: ${lines.map(lineText).join(' · ')}`
         : `- ${s.section}: (sin líneas todavía)`;
     })
     .join('\n');
@@ -90,36 +126,41 @@ function catalogText(catalog: VoiceCatalogEntry[]): string {
 /**
  * El texto que se le manda a OpenAI.
  *
- * Se le da el presupuesto actual (secciones y sus líneas) para que sitúe el cambio
- * junto al servicio al que se refiere —devolviendo esa línea como `anchor`—, y su
- * catálogo para que reconozca el servicio dictado. Se le prohíbe inventar precios: el
- * precio se confirma en el editor, nunca lo pone la IA.
+ * Se le da el presupuesto actual —secciones y sus líneas, con la cantidad de cada una—
+ * para que decida si el cambio MODIFICA una línea que ya está (y con qué cantidad final),
+ * la QUITA, o AÑADE una nueva; y su catálogo para que reconozca el servicio dictado. Se le
+ * prohíbe inventar precios: el precio se confirma en el editor, nunca lo pone la IA.
  */
 export function voiceChangePrompt(
   transcript: string,
   outline: VoiceOutlineSection[],
   catalog: VoiceCatalogEntry[] = [],
 ): string {
-  return `Eres un experto en reformas del hogar. Un encargado de obra ha dictado un CAMBIO sobre un presupuesto que YA existe. No hay que rehacer el presupuesto: sólo hay que añadir o ajustar lo que ha cambiado, pegado al servicio al que se refiere.
+  return `Eres un experto en reformas del hogar. Un encargado de obra ha dictado un CAMBIO sobre un presupuesto que YA existe. No hay que rehacerlo: hay que interpretar el cambio y decir, para cada cosa, si MODIFICA una línea que ya está, si la QUITA, o si AÑADE una nueva.
 
-Tarea: interpreta lo dictado y propón las líneas que correspondan, situándolas donde van.
+Tarea: interpreta lo dictado y devuelve las operaciones que correspondan.
+
+Para cada línea elige una "op":
+- "update": el cambio va sobre una línea que YA está en el presupuesto (p. ej. «pon dos más» o «déjalo en cinco»). En "quantity" pon la cantidad FINAL que debe quedar, NO la diferencia. Copia en "anchor" esa línea existente tal cual.
+- "remove": el encargado quiere quitar del presupuesto una línea que ya está. Copia en "anchor" esa línea existente tal cual.
+- "add": es algo que todavía NO está en el presupuesto. Pon en "source" "catalog" si coincide con una partida del catálogo del encargado, o "new" si no.
 
 Reglas:
-- Escribe descripciones claras en español, en infinitivo ("Instalar 3 enchufes en el salón").
-- Reconoce el servicio en el catálogo del encargado y usa su nombre y su unidad cuando encaje.
-- Si el cambio se refiere a un trabajo que YA figura como una línea del presupuesto, devuélvelo en "anchor": una copia EXACTA de esa línea (tal cual aparece abajo). Si no se refiere a ninguna, anchor = null.
+- Si el cambio se refiere a una línea que YA figura abajo, usa "update" o "remove", NUNCA la dupliques con "add".
+- En "anchor" copia LITERALMENTE la descripción de la línea existente (tal cual aparece abajo); null si el cambio no se refiere a ninguna.
+- Escribe descripciones claras en español, en infinitivo ("Instalar 3 enchufes en el salón"), y usa el nombre y la unidad del catálogo cuando encajen.
 - Elige en "section" la sección existente donde va el cambio (la del anchor si lo hay); si ninguna encaja, section = null.
 - NO inventes precios ni totales: el precio lo confirmará el usuario.
 - Si lo dictado no da para ninguna línea, devuelve "lines": [].
 
-Secciones del presupuesto (con sus líneas actuales):
+Secciones del presupuesto (línea × cantidad actual):
 ${outlineText(outline)}
 
 Catálogo del encargado:
 ${catalogText(catalog)}
 
 Devuelve ÚNICAMENTE un JSON con este formato:
-{ "summary": "resumen corto del cambio", "section": "nombre de la sección o null", "lines": [ { "description": "…", "quantity": 1, "unit": "ud", "anchor": "línea existente o null" } ] }
+{ "summary": "resumen corto del cambio", "section": "nombre de la sección o null", "lines": [ { "op": "add|update|remove", "description": "…", "quantity": 1, "unit": "ud", "anchor": "línea existente o null", "source": "catalog|new|null" } ] }
 
 Texto dictado:
 """${transcript}"""`;
@@ -149,6 +190,78 @@ export function proposalLineToRow(
     quantity: line.quantity,
     total: 0,
   };
+}
+
+/**
+ * La línea del editor cuando el servicio dictado SÍ está en el catálogo de la empresa:
+ * hereda su nombre, su unidad y —esta vez sí— su precio. Así un cambio que dice «pon un
+ * plato de ducha» entra al presupuesto con el precio de catálogo en lugar de «por
+ * confirmar». Una descripción libre (sin partida en el catálogo) sigue yendo por
+ * `proposalLineToRow`. El id se pasa para que la función siga siendo pura.
+ */
+export function catalogLineToRow(
+  line: VoiceProposalLine,
+  section: string | null,
+  service: CatalogService,
+  id: string,
+  position = 0,
+): EstimateRow {
+  const quantity = line.quantity > 0 ? line.quantity : 1;
+  return {
+    id,
+    type: 'item',
+    position,
+    phase_name_snapshot: section,
+    service_name_snapshot: service.name,
+    unit_snapshot: service.unit,
+    price_snapshot: service.base_price,
+    client_note: null,
+    quantity,
+    total: service.base_price * quantity,
+  };
+}
+
+/**
+ * Índice de la línea de presupuesto que habla del mismo trabajo que `text`, o -1 si
+ * ninguna. Sólo mira líneas de tipo `item` y usa la misma contención que el anclaje
+ * (`sameWork`): «bañera» encuentra «Bañera blanca 170 cm».
+ */
+export function findExistingLine(rows: EstimateRow[], text: string): number {
+  if (!text) return -1;
+  return rows.findIndex(
+    (r) => r.type === 'item' && !!r.service_name_snapshot && sameWork(text, r.service_name_snapshot),
+  );
+}
+
+/**
+ * La partida del catálogo de la empresa que corresponde a lo dictado: primero por nombre
+ * exacto (ignorando acentos y mayúsculas) y, si no, por contención con el mismo mínimo que
+ * el anclaje. Devuelve null cuando ninguna encaja: entonces la línea se añade «por
+ * confirmar». El veredicto de la IA (`source`) es sólo una pista; manda esta comparación
+ * determinista, para que no pueda colar como «nueva» algo que ya está en el catálogo.
+ *
+ * Vive aquí, y no en `catalog-match`, porque el editor la usa en el navegador:
+ * `catalog-match` arrastra el catálogo por defecto y no debe viajar al cliente. Sólo se
+ * necesita `catalogKey`, que sí es seguro en cliente.
+ */
+export function resolveCatalogMatch(text: string, catalog: CatalogService[]): CatalogService | null {
+  const key = catalogKey(text);
+  if (!key) return null;
+
+  const exact = catalog.find((s) => catalogKey(s.name) === key);
+  if (exact) return exact;
+
+  if (key.length >= MIN_MATCH_LENGTH) {
+    const contained = catalog.find((s) => catalogKey(s.name).includes(key));
+    if (contained) return contained;
+  }
+
+  return (
+    catalog.find((s) => {
+      const sk = catalogKey(s.name);
+      return sk.length >= MIN_MATCH_LENGTH && key.includes(sk);
+    }) ?? null
+  );
 }
 
 /** Un nombre más corto que esto nunca casa por contención: «bañera» sí, «luz» no. */
@@ -208,4 +321,59 @@ export function voiceInsertionIndex(
   }
 
   return rows.length;
+}
+
+/**
+ * Aplica al presupuesto las líneas que devolvió la IA y devuelve las filas resultantes.
+ * Es pura (el id lo genera `mkId`, `crypto.randomUUID` en el navegador) para poder
+ * probarla en Node sin base de datos ni DOM.
+ *
+ * - `add`   : crea una línea. Si el dictado casa con el catálogo, hereda su nombre, su
+ *             unidad y su precio; si no, nace «por confirmar» a precio 0. Se coloca con
+ *             `voiceInsertionIndex`, pegada al servicio al que se refiere.
+ * - `update`: fija la cantidad FINAL de la línea que refiere (por `anchor`, o por su
+ *             descripción). Si esa línea no existe, no se pierde el cambio: se añade.
+ * - `remove`: quita del presupuesto la línea que refiere.
+ *
+ * Las operaciones se aplican en orden sobre el array en curso, así que varias líneas
+ * seguidas (añadir algo y luego ajustarlo) se resuelven de forma coherente.
+ */
+export function applyVoiceOps(
+  rows: EstimateRow[],
+  lines: VoiceProposalLine[],
+  section: string | null,
+  catalog: CatalogService[],
+  mkId: () => string,
+): EstimateRow[] {
+  const next = [...rows];
+
+  for (const line of lines) {
+    const target = line.anchor || line.description;
+
+    if (line.op === 'remove') {
+      const at = findExistingLine(next, target);
+      if (at >= 0) next.splice(at, 1);
+      continue;
+    }
+
+    if (line.op === 'update') {
+      const at = findExistingLine(next, target);
+      if (at >= 0) {
+        const row = next[at];
+        const quantity = line.quantity > 0 ? line.quantity : row.quantity;
+        next[at] = { ...row, quantity, total: quantity * (row.price_snapshot ?? 0) };
+        continue;
+      }
+      // La línea que dice modificar no está: se añade, para no perder el cambio.
+    }
+
+    const at = voiceInsertionIndex(next, section, line.anchor ?? null);
+    const match = resolveCatalogMatch(line.description, catalog);
+    const newRow = match
+      ? catalogLineToRow(line, section, match, mkId(), at)
+      : proposalLineToRow(line, section, mkId(), at);
+    next.splice(at, 0, newRow);
+  }
+
+  return next;
 }

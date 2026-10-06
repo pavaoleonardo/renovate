@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { AI_RATE_LIMIT_MESSAGE, VOICE_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai';
-import { parseVoiceProposal, voiceChangePrompt, VoiceOutlineSection, VoiceCatalogEntry } from '@/lib/voice-change';
+import { parseVoiceProposal, voiceChangePrompt, VoiceOutlineSection, VoiceOutlineLine, VoiceCatalogEntry } from '@/lib/voice-change';
 
 /** Topes del contexto que llega del editor, para que un envío inflado no se cuele. */
 const MAX_OUTLINE_SECTIONS = 60;
@@ -13,7 +13,7 @@ function cleanText(value: unknown): string {
   return typeof value === 'string' ? value.trim().slice(0, MAX_TEXT) : '';
 }
 
-/** El presupuesto que manda el editor: cada sección con las descripciones de sus líneas. */
+/** El presupuesto que manda el editor: cada sección con sus líneas (descripción y cantidad). */
 function parseOutline(raw: unknown): VoiceOutlineSection[] {
   if (!Array.isArray(raw)) return [];
   const out: VoiceOutlineSection[] = [];
@@ -23,9 +23,20 @@ function parseOutline(raw: unknown): VoiceOutlineSection[] {
     const section = cleanText(record.section);
     if (!section) continue;
     const linesRaw = record.lines;
-    const lines = Array.isArray(linesRaw)
-      ? linesRaw.slice(0, MAX_OUTLINE_LINES).map(cleanText).filter(Boolean)
-      : [];
+    const lines: VoiceOutlineLine[] = [];
+    if (Array.isArray(linesRaw)) {
+      for (const entry of linesRaw.slice(0, MAX_OUTLINE_LINES)) {
+        // El editor manda objetos {description, quantity}; un string suelto también se
+        // acepta, para no romper con una versión antigua del cliente.
+        const isObject = !!entry && typeof entry === 'object';
+        const description = isObject
+          ? cleanText((entry as Record<string, unknown>).description)
+          : cleanText(entry);
+        if (!description) continue;
+        const quantity = isObject ? Number((entry as Record<string, unknown>).quantity) : 1;
+        lines.push({ description, quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1 });
+      }
+    }
     out.push({ section, lines });
   }
   return out;

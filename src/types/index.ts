@@ -64,24 +64,43 @@ export interface PendingNote {
   created_at?: string;
 }
 
-/** A budget line the AI proposes from a dictated change. Never has a price yet. */
+/**
+ * What a dictated change does to the budget: `add` creates a new line, `update` sets the
+ * final quantity of a line that already exists, `remove` takes an existing line out.
+ */
+export type VoiceLineOp = 'add' | 'update' | 'remove';
+
+/** A budget line the AI proposes from a dictated change. Never has a price of its own. */
 export interface VoiceProposalLine {
+  /** What the change does to the budget. Unknown values fall back to `add`. */
+  op: VoiceLineOp;
   /** Plain-language description, e.g. "Instalar 3 enchufes en el salón". */
   description: string;
+  /**
+   * For `add`: how many units to add. For `update`: the FINAL quantity the line should
+   * end up with (not the difference). Ignored by `remove`.
+   */
   quantity: number;
   unit: string;
   /**
-   * Existing budget line this change attaches to, copied verbatim (e.g. "Bañera blanca
-   * 170 cm"). The new line is placed just below it. `null` when it relates to none — the
-   * line then lands in its section or, with no hint at all, at the end of the budget.
+   * Existing budget line this change refers to, copied verbatim (e.g. "Bañera blanca
+   * 170 cm"): the line an `update`/`remove` acts on, and where an `add` is placed (just
+   * below it). `null` when it relates to none — the line then lands in its section or, with
+   * no hint at all, at the end of the budget.
    */
   anchor?: string | null;
+  /**
+   * Only meaningful for `add`: whether the AI thinks the work matches a catalog entry
+   * (`'catalog'`) or is brand new (`'new'`). It is only a hint — the editor re-checks the
+   * catalog itself before deciding the price, so a wrong hint never invents a price.
+   */
+  source?: 'catalog' | 'new' | null;
 }
 
 /**
  * What OpenAI returns for a dictated change: a short summary, the section it
- * seems to belong to, and the lines to add. The user reviews and edits all of it
- * before anything reaches the budget.
+ * seems to belong to, and the lines to add or adjust. The user reviews and edits all of
+ * it before anything reaches the budget.
  */
 export interface VoiceProposal {
   summary: string;

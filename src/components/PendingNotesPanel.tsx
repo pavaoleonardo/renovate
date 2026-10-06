@@ -1,42 +1,25 @@
 "use client";
 
-import { useState } from 'react';
 import { PendingNote } from '@/types';
-import { Check, Plus, Trash2 } from 'lucide-react';
-import { appendTranscript } from '@/lib/speech';
-import VoiceButton from './VoiceButton';
+import { Check, Trash2 } from 'lucide-react';
 
 /**
  * "Cambios de esta obra": the changes captured while the work is going on.
  * Internal only — nothing here is printed on the client PDF until the user
  * converts a note into a line of the budget.
+ *
+ * Notes get in through the single voice box above («Guardar como cambio»); this panel
+ * just lists them and lets the user convert or dismiss each one.
  */
 export default function PendingNotesPanel({
   notes,
-  onAdd,
   onConvert,
   onDismiss,
 }: {
   notes: PendingNote[];
-  onAdd: (text: string) => void | Promise<void>;
   onConvert: (note: PendingNote) => void | Promise<void>;
   onDismiss: (note: PendingNote) => void | Promise<void>;
 }) {
-  const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    const clean = text.trim();
-    if (!clean || busy) return;
-    setBusy(true);
-    try {
-      await onAdd(clean);
-      setText('');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8">
       <div className="flex items-center justify-between gap-3 mb-2">
@@ -48,36 +31,8 @@ export default function PendingNotesPanel({
         )}
       </div>
       <p className="text-xs text-amber-800/80 font-medium mb-3">
-        Anota aquí lo que pide el cliente durante la obra. No aparece en el PDF hasta que lo conviertas en una línea.
+        Cambios apuntados durante la obra. No aparecen en el PDF hasta que los conviertas en una línea. Dicta uno nuevo en el cuadro de arriba y elige «Guardar como cambio».
       </p>
-
-      <div className="flex flex-col sm:flex-row gap-2 mb-3">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder="Ej.: añadir 3 enchufes en el salón…"
-          className="flex-1 px-3 py-2 rounded-lg border border-amber-200 bg-white text-sm text-zinc-800 focus:outline-none focus:ring-2 focus:ring-amber-200"
-        />
-        <VoiceButton
-          onTranscript={(chunk) => setText((prev) => appendTranscript(prev, chunk))}
-          title="Dictar la nota"
-          className="border-amber-200 hover:border-amber-300"
-        />
-        <button
-          type="button"
-          onClick={submit}
-          disabled={busy || !text.trim()}
-          className="shrink-0 flex items-center justify-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg font-bold text-sm transition disabled:opacity-50 active:scale-95"
-        >
-          <Plus size={16} /> Añadir nota
-        </button>
-      </div>
 
       {notes.length === 0 ? (
         <p className="text-xs text-amber-700/70 font-medium italic">Nada pendiente por ahora.</p>
