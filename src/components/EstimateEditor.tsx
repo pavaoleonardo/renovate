@@ -93,8 +93,11 @@ export default function EstimateEditor({
 
   // What "saved" means for the unsaved-changes indicator: the last layout the
   // server confirmed. Any edit to `rows` that no longer matches it is unsaved.
-  const savedRowsJson = useRef<string>(JSON.stringify(initialRows || []));
-  const isDirty = useMemo(() => JSON.stringify(rows) !== savedRowsJson.current, [rows]);
+  // Snapshot of the last saved rows, as state (not a ref): a successful save updates it,
+  // which re-runs the memo below and clears the "Cambios sin guardar" hint. With a ref the
+  // memo kept its cached `true` — the edit it compared against never changed.
+  const [savedRowsJson, setSavedRowsJson] = useState<string>(() => JSON.stringify(initialRows || []));
+  const isDirty = useMemo(() => JSON.stringify(rows) !== savedRowsJson, [rows, savedRowsJson]);
 
   // Warn before leaving with unsaved lines — closing the tab used to lose the
   // whole budget silently.
@@ -261,7 +264,7 @@ export default function EstimateEditor({
         setSaveError(res.error || 'No se pudo guardar. Inténtalo de nuevo.');
         return;
       }
-      savedRowsJson.current = JSON.stringify(rows);
+      setSavedRowsJson(JSON.stringify(rows));
       setSavedAt(Date.now());
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Error de conexión al guardar.');

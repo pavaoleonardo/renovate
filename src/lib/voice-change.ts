@@ -143,13 +143,13 @@ Tarea: interpreta lo dictado y devuelve las operaciones que correspondan.
 Para cada línea elige una "op":
 - "update": el cambio va sobre una línea que YA está en el presupuesto (p. ej. «pon dos más» o «déjalo en cinco»). En "quantity" pon la cantidad FINAL que debe quedar, NO la diferencia. Copia en "anchor" esa línea existente tal cual.
 - "remove": el encargado quiere quitar del presupuesto una línea que ya está. Copia en "anchor" esa línea existente tal cual.
-- "add": es algo que todavía NO está en el presupuesto. Pon en "source" "catalog" si coincide con una partida del catálogo del encargado, o "new" si no.
+- "add": es algo que todavía NO está en el presupuesto. Pon en "source" "catalog" si coincide con una partida del catálogo del encargado, o "new" si no. Si va junto a una línea que ya existe, copia esa línea en "anchor" para que la nueva quede pegada a ella.
 
 Reglas:
 - Si el cambio se refiere a una línea que YA figura abajo, usa "update" o "remove", NUNCA la dupliques con "add".
 - En "anchor" copia LITERALMENTE la descripción de la línea existente (tal cual aparece abajo); null si el cambio no se refiere a ninguna.
 - Escribe descripciones claras en español, en infinitivo ("Instalar 3 enchufes en el salón"), y usa el nombre y la unidad del catálogo cuando encajen.
-- Elige en "section" la sección existente donde va el cambio (la del anchor si lo hay); si ninguna encaja, section = null.
+- Elige en "section" la sección existente donde va el cambio (la del anchor si lo hay). No la dejes en null si puedes deducir a qué sección pertenece: de lo contrario la línea acabaría al final del presupuesto.
 - NO inventes precios ni totales: el precio lo confirmará el usuario.
 - Si lo dictado no da para ninguna línea, devuelve "lines": [].
 
@@ -330,7 +330,10 @@ export function voiceInsertionIndex(
  *
  * - `add`   : crea una línea. Si el dictado casa con el catálogo, hereda su nombre, su
  *             unidad y su precio; si no, nace «por confirmar» a precio 0. Se coloca con
- *             `voiceInsertionIndex`, pegada al servicio al que se refiere.
+ *             `voiceInsertionIndex`, pegada al servicio al que se refiere: primero por el
+ *             `anchor` de la IA y, si ésta no lo trae, por la propia descripción de la
+ *             línea, para que «añade dos enchufes» caiga bajo el «Enchufes» que ya existe
+ *             en lugar de al final del presupuesto.
  * - `update`: fija la cantidad FINAL de la línea que refiere (por `anchor`, o por su
  *             descripción). Si esa línea no existe, no se pierde el cambio: se añade.
  * - `remove`: quita del presupuesto la línea que refiere.
@@ -367,7 +370,10 @@ export function applyVoiceOps(
       // La línea que dice modificar no está: se añade, para no perder el cambio.
     }
 
-    const at = voiceInsertionIndex(next, section, line.anchor ?? null);
+    // Colocar pegado al servicio al que se refiere. La IA suele traer `anchor`, pero cuando
+    // no lo manda la descripción sirve de anclaje de reserva: si nombra una línea que ya
+    // existe, el cambio se cuelga de ella; si no casa con nada, se cae a la sección.
+    const at = voiceInsertionIndex(next, section, line.anchor || line.description);
     const match = resolveCatalogMatch(line.description, catalog);
     const newRow = match
       ? catalogLineToRow(line, section, match, mkId(), at)

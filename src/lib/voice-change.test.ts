@@ -258,4 +258,28 @@ describe('applyVoiceOps', () => {
     const out = applyVoiceOps(rows, [line({ op: 'add', anchor: 'bañera', description: 'Plato de ducha' })], 'Baño', catalog, counter())
     expect(out.map((r) => r.service_name_snapshot || r.phase_name_snapshot)).toEqual(['Baño', 'Bañera blanca 170 cm', 'Plato de ducha', 'Pintura'])
   })
+
+  it('add sin anchor: se cuelga de la línea existente que nombra su propia descripción', () => {
+    // La IA a menudo deja `anchor` en null en los «add». Sin esta reserva la línea caería
+    // al final de la sección; con ella se pega al «Enchufes» que ya está en el presupuesto.
+    const rows = [row('phase', 'Electricidad'), row('item', 'Enchufes'), row('phase', 'Pintura')]
+    const out = applyVoiceOps(rows, [line({ op: 'add', description: 'Instalar 2 enchufes' })], 'Electricidad', catalog, counter())
+    expect(out.map((r) => r.service_name_snapshot || r.phase_name_snapshot)).toEqual([
+      'Electricidad',
+      'Enchufes',
+      `Instalar 2 enchufes (${PRICE_TO_CONFIRM})`,
+      'Pintura',
+    ])
+  })
+
+  it('add sin anchor ni coincidencia: cae al final de su sección, no del presupuesto', () => {
+    const rows = [row('phase', 'Baño'), row('item', 'Bañera blanca 170 cm'), row('phase', 'Pintura')]
+    const out = applyVoiceOps(rows, [line({ op: 'add', description: 'Sellar la junta' })], 'Baño', catalog, counter())
+    expect(out.map((r) => r.service_name_snapshot || r.phase_name_snapshot)).toEqual([
+      'Baño',
+      'Bañera blanca 170 cm',
+      `Sellar la junta (${PRICE_TO_CONFIRM})`,
+      'Pintura',
+    ])
+  })
 })
