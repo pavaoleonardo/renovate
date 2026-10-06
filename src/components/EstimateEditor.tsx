@@ -283,7 +283,9 @@ export default function EstimateEditor({
   // change the quantity of an existing line, or remove one. Placement and the catalog
   // match live in the pure `applyVoiceOps`.
   const handleApplyVoice = (lines: VoiceProposalLine[], section: string | null) => {
-    setRows(prev => applyVoiceOps(prev, lines, section, catalog || [], crypto.randomUUID));
+    // Wrap in an arrow: passing `crypto.randomUUID` bare would lose its `this` receiver and
+    // throw "Illegal invocation" the moment `applyVoiceOps` calls it (browser brand check).
+    setRows(prev => applyVoiceOps(prev, lines, section, catalog || [], () => crypto.randomUUID()));
   };
 
   // Converting adds the line to the budget (unsaved, so the user reviews it) and
