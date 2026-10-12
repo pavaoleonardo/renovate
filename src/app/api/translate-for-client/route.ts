@@ -51,9 +51,9 @@ export async function POST(req: NextRequest) {
 
   const prompt = `Eres un experto en reformas del hogar. El siguiente listado contiene servicios técnicos de construcción escritos en jerga profesional.
 
-Tu tarea: para cada servicio, escribe una descripción corta (máximo 2 frases) en español claro y sencillo que un propietario sin conocimientos técnicos pueda entender fácilmente. Describe QUÉ se hace y POR QUÉ beneficia al cliente.
+Tu tarea: para cada servicio, escribe UNA sola frase muy corta (máximo 12 palabras) en español sencillo y directo que diga al propietario QUÉ trabajo se hace. Nada más: sin explicar beneficios, sin justificar el precio y sin repetir el nombre de la partida. Una nota de dos frases por línea hace el presupuesto interminable y confunde al cliente que lo lee entero.
 
-Devuelve ÚNICAMENTE un JSON con el formato: { "id_del_servicio": "descripción para el cliente", ... }
+Devuelve ÚNICAMENTE un JSON con el formato: { "id_del_servicio": "frase corta para el cliente", ... }
 
 Servicios:
 ${serviceList}`;

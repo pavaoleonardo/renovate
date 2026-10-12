@@ -1,43 +1,27 @@
-import { getEstimateDetails, searchCatalog, getCompanyProfile, ensureCatalog, getPendingNotes, getParentEstimate } from '@/app/actions';
-import EstimateEditor from '@/components/EstimateEditor';
-import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { getEstimateDetails } from '@/app/actions';
+import EstimateEditorLoader from '@/components/EstimateEditorLoader';
 
-export default async function EstimateDocumentPage({ params }: { params: { id: string } }) {
-  const { estimate, rows = [] } = await getEstimateDetails(params.id);
-  const { data: pendingNotes } = await getPendingNotes(params.id);
+/**
+ * Pre-clients address of an obra, kept for bookmarks. It redirects to the obra's
+ * canonical home under its client.
+ *
+ * Only a budget WITHOUT a client is rendered here instead: there is no client id
+ * to build the canonical path with, and dropping it at /clients would leave a real
+ * document (its PDF is in someone's inbox) with no way to be opened.
+ */
+export default async function LegacyEstimatePage({ params }: { params: { id: string } }) {
+  const { estimate } = await getEstimateDetails(params.id);
 
-  // A Modificación: fetch the original budget for the heading and the link back.
-  const parentEstimate = estimate.kind === 'modificacion' && estimate.parent_estimate_id
-    ? await getParentEstimate(estimate.parent_estimate_id)
-    : null;
-
-  let catalog = (await searchCatalog()) || [];
-  if (catalog.length === 0) {
-    // First time this company opens a budget with an empty catalog: load the
-    // default one (42 partidas) so nobody has to start from scratch.
-    await ensureCatalog();
-    catalog = (await searchCatalog()) || [];
-  }
-
-  const company = await getCompanyProfile();
-
-  if (!estimate) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-        <h2 className="text-2xl font-bold text-zinc-900">Presupuesto no encontrado</h2>
-        <Link href="/estimates" className="text-blue-600 hover:underline">Volver al listado</Link>
-      </div>
-    );
+  if (estimate?.client_id) {
+    redirect(`/clients/${estimate.client_id}/estimates/${params.id}`);
   }
 
   return (
-    <EstimateEditor 
-      initialEstimate={estimate} 
-      initialRows={rows} 
-      catalog={catalog}
-      company={company}
-      initialPendingNotes={pendingNotes || []}
-      parentEstimate={parentEstimate}
+    <EstimateEditorLoader
+      estimateId={params.id}
+      backHref="/clients"
+      backLabel="Volver a mis clientes"
     />
   );
 }

@@ -3,7 +3,7 @@ import { combinedTotals, computeTotals, normalizeTaxRate, round2, taxHint, taxLa
 
 /**
  * The money in a budget. This file exists because the VAT was once hardcoded in two
- * places with two meanings (the editor added 21 % on top, /estimates showed the base
+ * places with two meanings (the editor added 21 % on top, the budget list showed the base
  * amount). Every case below is a figure a client can end up reading on a PDF.
  */
 

@@ -2,9 +2,8 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { Estimate, EstimateRow, CatalogService, EstimateStatus, CompanyProfile, PendingNote, VoiceProposalLine } from '@/types';
-import { saveEstimateRows, updateEstimateStatus, updateEstimateInfo, updateEstimateTaxRate, addPendingNote, convertPendingNote, dismissPendingNote, createModificacion } from '@/app/actions';
+import { Estimate, EstimateRow, CatalogService, Client, EstimateStatus, CompanyProfile, PendingNote, VoiceProposalLine } from '@/types';
+import { saveEstimateRows, updateEstimateStatus, updateEstimateInfo, updateEstimateTaxRate, addPendingNote, convertPendingNote, dismissPendingNote, addClient, assignEstimateClient } from '@/app/actions';
 import { Plus, GripVertical, Trash2, Printer, CheckCircle2, ChevronUp, ChevronDown, Sparkles } from 'lucide-react';
 import { computeTotals, normalizeTaxRate, taxHint, taxLabel, TAX_RATE_OPTIONS } from '@/lib/estimate-totals';
 import { catalogKey } from '@/lib/catalog-key';
@@ -61,23 +60,24 @@ export default function EstimateEditor({
   initialRows, 
   catalog,
   company,
-  initialPendingNotes = [],
-  parentEstimate = null
+  clients = [],
+  initialPendingNotes = []
 }: { 
   initialEstimate: Estimate; 
   initialRows: EstimateRow[]; 
   catalog: CatalogService[];
   company: CompanyProfile | null;
+  /** The company's clients, so the header can link this obra to one of them. */
+  clients?: Client[];
   initialPendingNotes?: PendingNote[];
-  /** For a Modificación: the original budget, for the heading and the link back. */
-  parentEstimate?: { client_name: string; created_at?: string } | null;
 }) {
   const [estimate, setEstimate] = useState(initialEstimate);
   const [rows, setRows] = useState(initialRows || []);
   const [pendingNotes, setPendingNotes] = useState<PendingNote[]>(initialPendingNotes || []);
-  const [isCreatingMod, setIsCreatingMod] = useState(false);
-  const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+  const [showNewClient, setShowNewClient] = useState(false);
+  const [clientBusy, setClientBusy] = useState(false);
+  const [clientError, setClientError] = useState<string | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [dragNode_] = useState<HTMLDivElement | null>(null);
@@ -304,15 +304,40 @@ export default function EstimateEditor({
     await dismissPendingNote(note.id);
   };
 
-  // "Añadir trabajos adicionales": creates the addendum and jumps into its editor.
-  const handleAddModificacion = async () => {
-    setIsCreatingMod(true);
+  /**
+   * Links this obra to a client (or moves it to another one). The budget keeps the
+   * client's name as a snapshot — the PDF and the email print it with no join — and
+   * `updateClient()` refreshes it if the client is renamed on its ficha.
+   */
+  const handleClientChange = async (clientId: string) => {
+    if (!clientId) return;
+    setClientBusy(true);
+    setClientError(null);
     try {
-      const mod = await createModificacion(estimate.id);
-      router.push(`/estimates/${mod.id}`);
+      const updated = await assignEstimateClient(estimate.id, clientId);
+      setEstimate(updated);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'No se pudo crear la modificación.');
-      setIsCreatingMod(false);
+      setClientError(err instanceof Error ? err.message : 'No se pudo asignar el cliente.');
+    } finally {
+      setClientBusy(false);
+    }
+  };
+
+  /** Creates a client without leaving the obra, and links this budget to it. */
+  const handleNewClient = async (name: string, email: string) => {
+    const clean = name.trim();
+    if (!clean) return;
+    setClientBusy(true);
+    setClientError(null);
+    try {
+      const created = await addClient(clean, { email });
+      const updated = await assignEstimateClient(estimate.id, created.id);
+      setEstimate(updated);
+      setShowNewClient(false);
+    } catch (err) {
+      setClientError(err instanceof Error ? err.message : 'No se pudo crear el cliente.');
+    } finally {
+      setClientBusy(false);
     }
   };
 
@@ -406,13 +431,80 @@ export default function EstimateEditor({
         <div className="bg-white p-6 rounded-xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           {/* ... header content ... */}
           <div>
-            <input
-              className="text-3xl font-extrabold text-zinc-900 tracking-tight bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-lg px-2 py-1 w-full transition"
-              value={estimate.client_name}
-              onChange={(e) => setEstimate({ ...estimate, client_name: e.target.value })}
-              onBlur={() => updateEstimateInfo(estimate.id, { client_name: estimate.client_name })}
-              placeholder="Nombre del cliente"
-            />
+            {/* The client is its own ficha (one client, many obras), so its name is
+                chosen here and not typed: renaming it on the ficha updates every
+                obra that points at it. */}
+            <div className="flex items-center gap-2 flex-wrap px-2">
+              <h1 className="text-3xl font-extrabold text-zinc-900 tracking-tight">
+                {estimate.client_name || 'Sin cliente'}
+              </h1>
+              {estimate.client_id ? (
+                <Link href={`/clients/${estimate.client_id}`} className="text-xs font-bold text-blue-600 hover:underline whitespace-nowrap">
+                  Ver ficha
+                </Link>
+              ) : (
+                <span className="text-[10px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+                  sin cliente
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 px-2 mt-1 flex-wrap">
+              <select
+                value={estimate.client_id || ''}
+                onChange={(e) => handleClientChange(e.target.value)}
+                disabled={clientBusy}
+                title="Cliente al que pertenece esta obra"
+                aria-label="Cliente de la obra"
+                className="text-xs font-bold text-zinc-600 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-lg py-1.5 pl-2 pr-7 transition cursor-pointer disabled:opacity-50 max-w-[240px]"
+              >
+                <option value="" disabled>
+                  {clients.length === 0 ? 'No hay clientes todavía' : 'Elegir cliente…'}
+                </option>
+                {clients.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setShowNewClient(v => !v)}
+                className="text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1.5 rounded-lg transition whitespace-nowrap"
+              >
+                + Nuevo cliente
+              </button>
+              {clientBusy && <span className="text-[10px] font-bold text-zinc-400">guardando…</span>}
+            </div>
+            {clientError && <p className="text-[10px] font-bold text-red-500 px-2 mt-1">{clientError}</p>}
+            {showNewClient && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const data = new FormData(e.currentTarget);
+                  handleNewClient((data.get('name') as string) || '', (data.get('email') as string) || '');
+                }}
+                className="flex items-center gap-2 mt-2 mx-2 p-2 bg-blue-50/60 border border-blue-100 rounded-lg flex-wrap"
+              >
+                <input
+                  name="name"
+                  type="text"
+                  required
+                  placeholder="Nombre del cliente..."
+                  className="flex-1 min-w-[140px] px-2 py-1.5 bg-white border border-zinc-200 rounded-md text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none"
+                />
+                <input
+                  name="email"
+                  type="email"
+                  placeholder="Email (opcional)"
+                  className="flex-1 min-w-[140px] px-2 py-1.5 bg-white border border-zinc-200 rounded-md text-sm font-medium focus:ring-2 focus:ring-blue-100 outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={clientBusy}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-xs font-bold transition disabled:opacity-50"
+                >
+                  Crear y asignar
+                </button>
+              </form>
+            )}
             <div className="flex items-center gap-1 mt-1">
               <span className="text-zinc-400 pl-2">📍</span>
               <input
@@ -478,30 +570,8 @@ export default function EstimateEditor({
             >
               <Printer size={18} /> Exportar PDF
             </button>
-
-            {estimate.kind !== 'modificacion' && (
-              <button
-                onClick={handleAddModificacion}
-                disabled={isCreatingMod}
-                className="flex items-center gap-2 text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-4 py-2 rounded-lg transition font-semibold text-sm w-full md:w-auto justify-center disabled:opacity-50"
-              >
-                <Plus size={18} /> {isCreatingMod ? 'Creando…' : 'Añadir trabajos adicionales'}
-              </button>
-            )}
           </div>
         </div>
-
-        {estimate.kind === 'modificacion' && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center gap-2 text-amber-900 text-sm font-bold">
-            <Plus size={16} />
-            Modificación{parentEstimate ? ` de ${parentEstimate.client_name}` : ''}
-            {estimate.parent_estimate_id && (
-              <Link href={`/estimates/${estimate.parent_estimate_id}`} className="ml-auto text-amber-700 underline hover:no-underline">
-                Ver presupuesto original
-              </Link>
-            )}
-          </div>
-        )}
 
         <VoiceChangeCapture
           outline={voiceOutline}
@@ -554,10 +624,9 @@ export default function EstimateEditor({
             <>
           {/* On phones each line is a stacked card; from md up it is the 8-column table. */}
           <div>
-          <div className="hidden md:grid grid-cols-[30px_1fr_120px_60px_100px_80px_100px_30px] gap-3 p-3 bg-zinc-50/80 border-b border-zinc-100 text-[10px] font-bold text-zinc-400 uppercase tracking-widest items-center">
+          <div className="hidden md:grid grid-cols-[30px_1fr_60px_100px_80px_100px_30px] gap-3 p-3 bg-zinc-50/80 border-b border-zinc-100 text-[10px] font-bold text-zinc-400 uppercase tracking-widest items-center">
             <div></div>
-            <div>Descripción</div>
-            <div>Catálogo</div>
+            <div>Descripción del ítem</div>
             <div className="text-center">Unid</div>
             <div className="text-right">Precio</div>
             <div className="text-center">Cant</div>
@@ -617,35 +686,40 @@ export default function EstimateEditor({
                   onDragOver={(e) => handleDragOver(rowIndex, e)}
                   onDrop={(e) => handleDrop(rowIndex, e)}
                   onDragEnd={handleDragEnd}
-                  className={`grid grid-cols-2 md:grid-cols-[30px_1fr_120px_60px_100px_80px_100px_30px] gap-3 p-4 md:p-2 md:items-center border-b border-zinc-100 md:border-0 hover:bg-zinc-50/80 group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
+                  className={`grid grid-cols-2 md:grid-cols-[30px_1fr_60px_100px_80px_100px_30px] gap-3 p-4 md:p-2 md:items-center border-b border-zinc-100 md:border-0 hover:bg-zinc-50/80 group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
                 >
                    <div className="hidden md:flex text-center cursor-grab active:cursor-grabbing text-zinc-200 hover:text-zinc-400 justify-center"><GripVertical size={16}/></div>
                    <div className="col-span-2 md:col-span-1 flex flex-col gap-1">
-                     <input 
-                        className="font-medium text-zinc-900 bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-md px-2 py-1.5 placeholder:text-zinc-300 transition w-full"
-                        value={row.service_name_snapshot || ''}
-                        onChange={(e) => updateRow(row.id, { service_name_snapshot: e.target.value })}
-                        placeholder="Descripción del ítem..."
-                      />
-                      {/* The client note lives in its own full-width row below (9th grid cell). */}
-                   </div>
-                    <div className="flex flex-col gap-1 min-w-0">
-                    <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Catálogo</label>
-                    <select
-                      className="w-full text-xs rounded-md border border-zinc-200 md:border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 bg-zinc-50 text-zinc-600 truncate py-1.5 px-2 font-medium transition cursor-pointer"
-                      onChange={(e) => applyService(row.id, e.target.value)}
-                      value=""
-                    >
-                      <option value="" disabled>{parentPhase ? `Elegir de «${parentPhase}»…` : 'Elegir del catálogo…'}</option>
-                      {sectionServices.length === 0 && (
-                        <option value="" disabled>Sin partidas del catálogo en esta sección</option>
-                      )}
-                      {sectionServices.map(c => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} ({c.unit} — {c.base_price.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })})
-                        </option>
-                      ))}
-                    </select>
+                     <div className="relative flex items-center rounded-md border border-transparent hover:border-zinc-200 focus-within:bg-white focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition">
+                         <input
+                           className="font-medium text-zinc-900 bg-transparent rounded-md pl-2 pr-7 py-1.5 placeholder:text-zinc-300 border-none focus:ring-0 w-full"
+                           value={row.service_name_snapshot || ''}
+                           onChange={(e) => updateRow(row.id, { service_name_snapshot: e.target.value })}
+                           placeholder="Descripción del ítem..."
+                         />
+                         {/* The dropdown opens from inside the description box: a native
+                             select stretched over the chevron. Picking a partida of this
+                             section fills description, unit and price at once. */}
+                         <select
+                           title={sectionServices.length === 0 ? 'No hay partidas del catálogo en esta sección' : 'Elegir una partida del catálogo'}
+                           aria-label="Elegir una partida del catálogo"
+                           value=""
+                           onChange={(e) => applyService(row.id, e.target.value)}
+                           className="absolute inset-y-0 right-0 w-8 opacity-0 cursor-pointer"
+                         >
+                           <option value="" disabled>{parentPhase ? `Elegir de «${parentPhase}»…` : 'Elegir del catálogo…'}</option>
+                           {sectionServices.length === 0 && (
+                             <option value="" disabled>Sin partidas del catálogo en esta sección</option>
+                           )}
+                           {sectionServices.map(c => (
+                             <option key={c.id} value={c.id}>
+                               {c.name} ({c.unit} — {c.base_price.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })})
+                             </option>
+                           ))}
+                         </select>
+                         <ChevronDown size={14} className="pointer-events-none absolute right-1.5 text-zinc-400" />
+                       </div>
+                       {/* The client note lives in its own full-width row below (9th grid cell). */}
                     </div>
                     <div className="flex flex-col gap-1">
                     <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Unid</label>
@@ -804,7 +878,6 @@ export default function EstimateEditor({
           estimate={estimate}
           rows={rows}
           company={company}
-          parentDateLabel={parentEstimate?.created_at ? new Date(parentEstimate.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' }) : null}
           onClose={() => setShowPreview(false)}
         />
       )}

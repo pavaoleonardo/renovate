@@ -4,7 +4,7 @@
  * Before this file existed the VAT lived hardcoded in two places with two
  * different meanings: EstimateEditor and EstimatePDFPreview put 21 % on top of
  * the rows, while saveEstimateRows() persisted the base amount in
- * estimates.total_amount — so /estimates showed a lower, unlabelled figure than
+ * estimates.total_amount — so the budget list showed a lower, unlabelled figure than
  * the document the client had received. Now every surface (editor, PDF, email,
  * dashboard and the values the server actions persist) goes through
  * computeTotals().
@@ -29,7 +29,7 @@ export interface EstimateTotals {
   taxRate: number;
   /** VAT amount; 0 when the budget is issued without VAT. */
   tax: number;
-  /** subtotal + tax: the figure /estimates shows and the PDF prints as TOTAL. */
+  /** subtotal + tax: the figure the list shows and the PDF prints as TOTAL. */
   total: number;
 }
 
@@ -85,7 +85,10 @@ export interface CombinedTotals {
 /**
  * Adds up a principal budget and its modifications. Each document is taxed with
  * its own rate, so the sum runs over their computed totals — never over the
- * un-taxed bases. /estimates shows the result as "12.400 € + 850 €".
+ * un-taxed bases.
+ *
+ * Kept, with its tests, after Modificación was removed: the app no longer nests
+ * budgets, so nothing in the UI calls it today.
  */
 export function combinedTotals(estimates: EstimateMoney[]): CombinedTotals {
   return estimates.reduce<CombinedTotals>(

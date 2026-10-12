@@ -40,7 +40,7 @@ export default async function RootLayout({
             
             {user && (
               <div className="flex gap-6 text-sm font-bold text-zinc-500 hidden md:flex">
-                <Link href="/estimates" className="hover:text-zinc-900 transition">Presupuestos</Link>
+                <Link href="/clients" className="hover:text-zinc-900 transition">Clientes</Link>
                 <Link href="/catalog" className="hover:text-zinc-900 transition">Catálogo</Link>
                 <Link href="/settings" className="hover:text-zinc-900 transition">Ajustes</Link>
               </div>
@@ -66,7 +66,7 @@ export default async function RootLayout({
           {user && (
             <div className="md:hidden border-t border-zinc-100">
               <div className="px-4 h-11 flex items-center gap-6 text-sm font-bold text-zinc-500 overflow-x-auto">
-                <Link href="/estimates" className="hover:text-zinc-900 transition whitespace-nowrap">Presupuestos</Link>
+                <Link href="/clients" className="hover:text-zinc-900 transition whitespace-nowrap">Clientes</Link>
                 <Link href="/catalog" className="hover:text-zinc-900 transition whitespace-nowrap">Catálogo</Link>
                 <Link href="/settings" className="hover:text-zinc-900 transition whitespace-nowrap">Ajustes</Link>
               </div>

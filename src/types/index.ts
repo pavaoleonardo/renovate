@@ -1,28 +1,49 @@
 export type EstimateStatus = 'draft' | 'sent' | 'approved' | 'rejected' | 'in_progress' | 'completed' | 'expired';
 export type RowType = 'phase' | 'item' | 'note';
-/** 'principal' is a normal budget; 'modificacion' is an addendum that hangs from one. */
-export type EstimateKind = 'principal' | 'modificacion';
+
+/**
+ * A client of the company. One client owns one or more obras (budgets), which is
+ * why the contact details live here and are not retyped on every document: a
+ * client who buys a second flat gets a second obra under the same ficha, not a
+ * second client.
+ */
+export interface Client {
+  id: string;
+  company_id?: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  /** Postal / fiscal address of the client — not the obra's. */
+  address: string | null;
+  /** Free notes the user keeps about the client. */
+  notes: string | null;
+  created_at?: string;
+}
+
 export interface Estimate {
   id: string;
+  /**
+   * The client this obra belongs to. Null only on budgets written before
+   * `clients` existed; the editor lets the user link them from the header.
+   */
+  client_id?: string | null;
+  /**
+   * The client's name, kept in sync with the client record so the PDF and the
+   * email can print it without a join. Renaming a client rewrites this on every
+   * obra that points at it.
+   */
   client_name: string;
+  /** Address (or name) of the obra: what tells two budgets of one client apart. */
   property_address: string;
   status: EstimateStatus;
   /** Sum of the rows, VAT excluded (base imponible). */
   subtotal_amount: number;
   /** Applied VAT percentage: 0 (sin IVA), 10 (vivienda > 2 años) or 21 (general). */
   tax_rate: number;
-  /** subtotal_amount + VAT. The figure shown on /estimates and as TOTAL in the PDF. */
+  /** subtotal_amount + VAT. The figure shown on the client's ficha and as TOTAL in the PDF. */
   total_amount: number;
   warranty_months: number;
   warranty_end_date: string | null;
-  /** 'principal' for a normal budget; 'modificacion' for an addendum. Absent = principal. */
-  kind?: EstimateKind;
-  /** The budget this addendum hangs from; null/absent for a principal. */
-  parent_estimate_id?: string | null;
-  /** Base (VAT excluded) frozen when the budget was approved; never rewritten later. */
-  approved_subtotal?: number | null;
-  /** Total (VAT included) frozen when the budget was approved. */
-  approved_total?: number | null;
   created_at?: string;
 }
 

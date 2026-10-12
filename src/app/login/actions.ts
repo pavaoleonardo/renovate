@@ -67,7 +67,7 @@ export async function login(formData: FormData) {
   }
 
   revalidatePath('/', 'layout')
-  redirect('/estimates')
+  redirect('/clients')
 }
 
 export async function signup(formData: FormData) {
@@ -146,5 +146,5 @@ export async function updatePassword(formData: FormData) {
   }
 
   revalidatePath('/', 'layout')
-  redirect('/estimates?message=Password updated successfully')
+  redirect('/clients?message=Password updated successfully')
 }

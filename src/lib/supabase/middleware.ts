@@ -64,7 +64,7 @@ export async function updateSession(request: NextRequest) {
   // If user is already logged in, prevent accessing login page
   if (user && path === '/login') {
     const url = request.nextUrl.clone()
-    url.pathname = '/estimates'
+    url.pathname = '/clients'
     return NextResponse.redirect(url)
   }
 

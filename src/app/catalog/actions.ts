@@ -1000,7 +1000,7 @@ export async function updateCatalogService(
   if (error) return { success: false, error: catalogErrorMessage(error.message) }
 
   revalidatePath('/catalog')
-  revalidatePath('/estimates')
+  revalidatePath('/clients')
   return { success: true }
 }
 
@@ -1011,7 +1011,7 @@ export async function deleteCatalogService(id: string) {
   if (error) return { success: false, error: catalogErrorMessage(error.message) }
 
   revalidatePath('/catalog')
-  revalidatePath('/estimates')
+  revalidatePath('/clients')
   return { success: true }
 }
 
@@ -1054,7 +1054,7 @@ export async function deleteCatalogPhase(phaseId: string) {
   if (error) return { success: false, error: catalogErrorMessage(error.message) }
 
   revalidatePath('/catalog')
-  revalidatePath('/estimates')
+  revalidatePath('/clients')
   return { success: true }
 }
 
@@ -1072,7 +1072,7 @@ export async function addCatalogService(phaseId: string, service: { name: string
   if (error) return { success: false, error: catalogErrorMessage(error.message) }
 
   revalidatePath('/catalog')
-  revalidatePath('/estimates')
+  revalidatePath('/clients')
   return { success: true }
 }
 

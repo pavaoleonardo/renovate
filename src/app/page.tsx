@@ -123,8 +123,8 @@ export default async function Home() {
             <div className="mt-8 flex flex-col sm:flex-row gap-3">
               {user ? (
                 <>
-                  <Link href="/estimates" className={primaryCta}>
-                    Ir a mis presupuestos <ArrowRight size={18} />
+                  <Link href="/clients" className={primaryCta}>
+                    Ir a mis clientes <ArrowRight size={18} />
                   </Link>
                   <Link href="/catalog" className={secondaryCta}>
                     Revisar mi catálogo
@@ -307,10 +307,10 @@ export default async function Home() {
 
           <div className="mt-8 flex justify-center">
             <Link
-              href={user ? '/estimates' : '/login/signup'}
+              href={user ? '/clients' : '/login/signup'}
               className="inline-flex items-center justify-center gap-2 bg-white hover:bg-zinc-50 active:scale-[0.98] text-blue-700 font-bold px-6 py-3.5 rounded-xl shadow-md transition"
             >
-              {user ? 'Ir a mis presupuestos' : 'Crear cuenta'} <ArrowRight size={18} />
+              {user ? 'Ir a mis clientes' : 'Crear cuenta'} <ArrowRight size={18} />
             </Link>
           </div>
         </div>

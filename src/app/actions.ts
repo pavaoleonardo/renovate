@@ -1,6 +1,6 @@
 'use server'
 
-import { Estimate, EstimateRow, CatalogService, CatalogPhase, CompanyProfile, LabourCategory, PriceSourceKind, PendingNote, PendingNoteStatus } from '@/types';
+import { Estimate, EstimateRow, CatalogService, CatalogPhase, Client, CompanyProfile, LabourCategory, PriceSourceKind, PendingNote, PendingNoteStatus } from '@/types';
 import { DEFAULT_CATALOG } from '@/lib/default-catalog';
 import { IMPORT_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai';
 import { catalogKey } from '@/lib/catalog-key';
@@ -56,26 +56,41 @@ export async function getCompanyProfile(): Promise<CompanyProfile | null> {
   return data as CompanyProfile;
 }
 
-export async function createEstimate(client_name: string, property_address: string) {
+/**
+ * Creates an obra (budget) for a client. The client's name is copied onto the
+ * estimate as a snapshot — the PDF and the email print it without a join — and
+ * `updateClient()` refreshes it whenever the client is renamed, so the two can
+ * never drift apart.
+ */
+export async function createEstimate(clientId: string, propertyAddress: string) {
   const supabase = createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Unauthorized');
-  
+
   const { data: userRecord } = await supabase
     .from('users')
     .select('company_id')
     .eq('id', user.id)
     .single();
-    
+
   if (!userRecord?.company_id) throw new Error("Could not identify user's company.");
+
+  const { data: client, error: clientError } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('id', clientId)
+    .single();
+
+  if (clientError || !client) throw new Error('No se encontró el cliente.');
 
   const { data, error } = await supabase
     .from('estimates')
     .insert({
       company_id: userRecord.company_id,
-      client_name: client_name || 'Nuevo Cliente',
-      property_address: property_address || 'Pendiente',
+      client_id: client.id,
+      client_name: client.name,
+      property_address: propertyAddress || 'Pendiente',
       status: 'draft',
       total_amount: 0,
       // subtotal_amount (0) and tax_rate (21) come from the column defaults, so
@@ -84,7 +99,7 @@ export async function createEstimate(client_name: string, property_address: stri
     })
     .select()
     .single();
-    
+
   if (error) throw new Error(error.message);
   return data as Estimate;
 }
@@ -223,21 +238,10 @@ export async function saveEstimateRows(estimateId: string, rows: EstimateRow[]) 
 export async function updateEstimateStatus(estimateId: string, status: Estimate['status']) {
   const supabase = createClient();
   
+  // Marking a budget as «Aceptado» no longer freezes a copy of its figures: with
+  // Modificación gone, alterations are made inside the budget itself, so the
+  // totals stored on the estimate are the ones the client accepted.
   const update: Record<string, unknown> = { status };
-
-  // Freeze what the client accepted: turning a budget into "Aceptado" records the
-  // figures it was approved with, so a later edit to the lines cannot rewrite them.
-  if (status === 'approved') {
-    const { data: current } = await supabase
-      .from('estimates')
-      .select('status, subtotal_amount, total_amount')
-      .eq('id', estimateId)
-      .single();
-    if (current && current.status !== 'approved') {
-      update.approved_subtotal = current.subtotal_amount ?? 0;
-      update.approved_total = current.total_amount ?? 0;
-    }
-  }
 
   const { data, error } = await supabase
     .from('estimates')
@@ -252,53 +256,179 @@ export async function updateEstimateStatus(estimateId: string, status: Estimate[
 }
 
 /**
- * Creates a "Modificación": an addendum budget that hangs from a principal one.
- * It copies the client, address, VAT and warranty so the user only has to add the
- * extra lines — and, with a negative price, the removed work.
+ * ── Clientes ──────────────────────────────────────────────────────────────────
+ * A client is who owns the obra; the budgets hang from the client, so a second
+ * reforma for the same person is a second obra under the same ficha instead of a
+ * duplicate client. Everything here is tenant-scoped by company_id (RLS), and
+ * the company always comes from the session, never from the caller.
  */
-export async function createModificacion(parentEstimateId: string) {
+
+/** Every client of the company, alphabetically. */
+export async function getClients(): Promise<{ data: Client[] }> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('clients')
+    .select('*')
+    .order('name', { ascending: true });
+
+  if (error) console.error('Error loading clients', error);
+  return { data: (data || []) as Client[] };
+}
+
+/** One client and the obras that hang from it, newest first. */
+export async function getClientWithEstimates(clientId: string) {
   const supabase = createClient();
 
-  const { data: parent, error: parentError } = await supabase
-    .from('estimates')
-    .select('company_id, client_name, property_address, tax_rate, warranty_months')
-    .eq('id', parentEstimateId)
+  const { data: client, error } = await supabase
+    .from('clients')
+    .select('*')
+    .eq('id', clientId)
     .single();
 
-  if (parentError || !parent) throw new Error('No se encontró el presupuesto original.');
+  if (error || !client) throw new Error('Cliente no encontrado.');
+
+  const { data: estimates } = await supabase
+    .from('estimates')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('created_at', { ascending: false });
+
+  return { client: client as Client, estimates: (estimates || []) as Estimate[] };
+}
+
+/** Creates a client ficha. */
+export async function addClient(
+  name: string,
+  contact: { email?: string; phone?: string; address?: string } = {}
+) {
+  const supabase = createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
+
+  const { data: userRecord } = await supabase
+    .from('users')
+    .select('company_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!userRecord?.company_id) throw new Error("Could not identify user's company.");
 
   const { data, error } = await supabase
-    .from('estimates')
+    .from('clients')
     .insert({
-      company_id: parent.company_id,
-      client_name: parent.client_name,
-      property_address: parent.property_address,
-      status: 'draft',
-      subtotal_amount: 0,
-      total_amount: 0,
-      tax_rate: parent.tax_rate,
-      warranty_months: parent.warranty_months,
-      kind: 'modificacion',
-      parent_estimate_id: parentEstimateId,
+      company_id: userRecord.company_id,
+      name: name.trim() || 'Cliente sin nombre',
+      email: contact.email?.trim() || null,
+      phone: contact.phone?.trim() || null,
+      address: contact.address?.trim() || null,
     })
     .select()
     .single();
 
   if (error) throw new Error(error.message);
 
-  revalidatePath('/estimates');
-  return data as Estimate;
+  revalidatePath('/clients');
+  return data as Client;
 }
 
-/** Minimal parent header (for the "Modificación del presupuesto del…" heading). */
-export async function getParentEstimate(parentId: string) {
+/**
+ * Updates a client ficha. When the name changes it is rewritten on the budgets
+ * that point at it too: `estimates.client_name` is only the snapshot the PDF and
+ * the email print, and a typo fixed here must not keep printing old on every
+ * document already written.
+ */
+export async function updateClient(
+  clientId: string,
+  updates: Partial<Pick<Client, 'name' | 'email' | 'phone' | 'address' | 'notes'>>
+): Promise<{ success: true; client: Client } | { success: false; error: string }> {
   const supabase = createClient();
-  const { data } = await supabase
-    .from('estimates')
-    .select('id, client_name, created_at')
-    .eq('id', parentId)
+
+  const clean: Record<string, unknown> = {};
+  if (updates.name !== undefined) clean.name = updates.name.trim() || 'Cliente sin nombre';
+  if (updates.email !== undefined) clean.email = updates.email?.trim() || null;
+  if (updates.phone !== undefined) clean.phone = updates.phone?.trim() || null;
+  if (updates.address !== undefined) clean.address = updates.address?.trim() || null;
+  if (updates.notes !== undefined) clean.notes = updates.notes?.trim() || null;
+
+  const { data, error } = await supabase
+    .from('clients')
+    .update(clean)
+    .eq('id', clientId)
+    .select()
     .single();
-  return (data as { id: string; client_name: string; created_at?: string } | null);
+
+  // Returned, never thrown: Next redacts the message of a thrown server action in
+  // production, so the user would see a generic error instead of this one.
+  if (error) return { success: false, error: error.message };
+
+  if (typeof clean.name === 'string') {
+    await supabase.from('estimates').update({ client_name: clean.name }).eq('client_id', clientId);
+  }
+
+  revalidatePath('/clients');
+  revalidatePath(`/clients/${clientId}`);
+  return { success: true, client: data as Client };
+}
+
+/**
+ * Deletes a client ficha. Refused while it still owns obras: they are real
+ * documents the client may already hold, and the foreign key would only drop the
+ * link (ON DELETE SET NULL), leaving them orphaned with no way back.
+ */
+export async function deleteClient(
+  clientId: string
+): Promise<{ success: true } | { success: false; error: string }> {
+  const supabase = createClient();
+
+  const { count } = await supabase
+    .from('estimates')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', clientId);
+
+  if ((count ?? 0) > 0) {
+    return {
+      success: false,
+      error: `Este cliente tiene ${count} obra(s). Elimínalas o asígnalas a otro cliente antes de borrar la ficha.`,
+    };
+  }
+
+  const { error } = await supabase.from('clients').delete().eq('id', clientId);
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath('/clients');
+  return { success: true };
+}
+
+/**
+ * Links a budget to a client (or moves it to another one) and refreshes the
+ * snapshot name with it. This is how a budget written before `clients` existed
+ * gets adopted by its ficha.
+ */
+export async function assignEstimateClient(estimateId: string, clientId: string) {
+  const supabase = createClient();
+
+  const { data: client, error: clientError } = await supabase
+    .from('clients')
+    .select('id, name')
+    .eq('id', clientId)
+    .single();
+
+  if (clientError || !client) throw new Error('No se encontró el cliente.');
+
+  const { data, error } = await supabase
+    .from('estimates')
+    .update({ client_id: client.id, client_name: client.name })
+    .eq('id', estimateId)
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath('/clients');
+  revalidatePath('/clients/[id]', 'page');
+  revalidatePath('/clients/[id]/estimates/[estimateId]', 'page');
+  return data as Estimate;
 }
 
 /**
@@ -336,8 +466,9 @@ export async function updateEstimateTaxRate(estimateId: string, taxRate: number)
 
   if (error) throw new Error(error.message);
 
-  revalidatePath('/estimates');
-  revalidatePath(`/estimates/${estimateId}`);
+  revalidatePath('/clients');
+  revalidatePath('/clients/[id]', 'page');
+  revalidatePath('/clients/[id]/estimates/[estimateId]', 'page');
 
   return { success: true, estimate: data as Estimate };
 }
@@ -392,7 +523,7 @@ export async function addPendingNote(
     return { success: false as const, error: error.message };
   }
 
-  revalidatePath('/estimates');
+  revalidatePath('/clients');
   return { success: true as const, note: data as PendingNote };
 }
 
@@ -413,7 +544,7 @@ async function setPendingNoteStatus(noteId: string, status: PendingNoteStatus) {
     return { success: false as const, error: error.message };
   }
 
-  revalidatePath('/estimates');
+  revalidatePath('/clients');
   return { success: true as const };
 }
 
@@ -425,7 +556,7 @@ export async function dismissPendingNote(noteId: string) {
   return setPendingNoteStatus(noteId, 'dismissed');
 }
 
-/** How many open notes each estimate has, for the badge on /estimates. */
+/** How many open notes each estimate has, for the badge on the client's ficha. */
 export async function getPendingCounts(): Promise<Record<string, number>> {
   const supabase = createClient();
   const { data, error } = await supabase
@@ -1065,7 +1196,7 @@ export async function seedDefaultCatalog(options?: { mode?: SeedMode }): Promise
   }
 
   revalidatePath('/catalog');
-  revalidatePath('/estimates');
+  revalidatePath('/clients');
 
   return { success: true, mode, phasesCreated, servicesCreated, servicesSkipped };
 }
