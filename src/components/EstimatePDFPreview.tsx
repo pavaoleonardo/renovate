@@ -2,6 +2,7 @@
 
 import { Estimate, EstimateRow, CompanyProfile } from '@/types';
 import { computeTotals } from '@/lib/estimate-totals';
+import { unconfirmedRows, PRICE_TO_CONFIRM } from '@/lib/pending-notes';
 import { X, Printer, Mail, Download, MessageCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -47,6 +48,18 @@ export default function EstimatePDFPreview({
   const totals = computeTotals(subtotal, estimate.tax_rate);
   const vatIncluded = totals.taxRate > 0;
 
+  // A budget is only a document once every line has a real price. Sending one
+  // with «por confirmar» or a 0 € line is exactly how a client ends up arguing
+  // about what was promised, so every exit (PDF, print, email, WhatsApp) is
+  // gated on this, and the reason is always visible while the preview is open.
+  const unconfirmed = unconfirmedRows(rows);
+  const canSend = unconfirmed.length === 0;
+  const guardMessage =
+    unconfirmed.length === 1
+      ? 'Falta 1 precio por confirmar.'
+      : `Faltan ${unconfirmed.length} precios por confirmar.`;
+  const guardSend = () => canSend;
+
   /** File name used for the downloaded / shared PDF (strips characters illegal on disk). */
   const pdfFileName = `Presupuesto - ${(estimate.client_name || 'cliente').replace(/[/\\?%*:|"<>]+/g, '').trim() || 'cliente'}.pdf`;
 
@@ -57,6 +70,7 @@ export default function EstimatePDFPreview({
   });
 
   const handlePrint = () => {
+    if (!guardSend()) return;
     window.print();
   };
 
@@ -134,7 +148,7 @@ export default function EstimatePDFPreview({
   };
 
   const handleDownloadPdf = async () => {
-    if (generating) return;
+    if (generating || !guardSend()) return;
     setGenerating(true);
     setHint('');
     try {
@@ -153,7 +167,7 @@ export default function EstimatePDFPreview({
    * open the mail draft, telling the user to attach the just-downloaded file.
    */
   const handleSendEmail = async () => {
-    if (!emailTo || busy) return;
+    if (!emailTo || busy || !guardSend()) return;
     setBusy(true);
     setHint('');
     try {
@@ -179,7 +193,9 @@ export default function EstimatePDFPreview({
    * gesture so the popup blocker lets it through.
    */
   const handleSendWhatsapp = async () => {
-    if (busy) return;
+    // Checked before opening the blank tab: a blocked send must not leave a
+    // stray window behind.
+    if (busy || !guardSend()) return;
     setBusy(true);
     setHint('');
     const phone = whatsappTo.replace(/\D/g, '');
@@ -301,6 +317,22 @@ export default function EstimatePDFPreview({
         )}
       </div>
 
+      {/* Honest state: the document can be reviewed, but it cannot leave the app
+          while a price is missing. Hidden when printing so it never lands on
+          paper, and it never blocks editing or closing the preview. */}
+      {!canSend && (
+        <div className="fixed bottom-0 left-0 right-0 z-[120] bg-amber-500 text-white shadow-lg print:hidden">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-2.5">
+            <p className="text-xs sm:text-sm font-black">
+              {guardMessage} No se puede enviar todavía.
+            </p>
+            <p className="text-[11px] font-medium text-amber-50 mt-0.5">
+              Confirma esos precios en el presupuesto: son las líneas marcadas «{PRICE_TO_CONFIRM}».
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* THE DOCUMENT PAPER */}
       <div ref={docRef} className="print-modal bg-white w-full max-w-4xl shadow-2xl rounded-sm mt-8 print:mt-0 overflow-hidden flex flex-col min-h-[29.7cm]">
         
@@ -344,7 +376,7 @@ export default function EstimatePDFPreview({
               </div>
             </div>
             <div className="bg-zinc-50 p-6 rounded-lg flex flex-col justify-center">
-              <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Presupuesto Estimado</div>
+              <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Presupuesto</div>
               <div className="text-3xl font-black text-zinc-900 tabular-nums">
                 {fmt(totals.total)}
               </div>
@@ -439,12 +471,15 @@ export default function EstimatePDFPreview({
               )}
             </div>
 
-            <div className="text-right max-w-[280px]">
+            <div className="text-right max-w-[280px] space-y-1.5">
               <p className="text-xs font-black text-zinc-700 uppercase leading-relaxed text-balance">
-                Este presupuesto tiene una validez de 30 días naturales
+                Precio cerrado para las partidas descritas
               </p>
-              <p className="text-[10px] text-zinc-400 font-medium mt-2 leading-relaxed">
-                Los precios contemplan materiales y mano de obra según descripción. Condiciones sujetas a revisión tras visita técnica final.
+              <p className="text-[10px] text-zinc-500 font-semibold leading-relaxed">
+                No incluye: trabajos no descritos ni imprevistos ocultos.
+              </p>
+              <p className="text-[10px] text-zinc-400 font-medium leading-relaxed">
+                Validez: 30 días desde la fecha.
               </p>
             </div>
           </div>

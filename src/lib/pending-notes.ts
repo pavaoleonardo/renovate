@@ -39,3 +39,26 @@ export function pendingToRow(note: PendingNote, id: string): EstimateRow {
 export function openNotes(notes: PendingNote[]): PendingNote[] {
   return notes.filter((n) => n.status === 'open');
 }
+
+/**
+ * A budget line whose price is not real yet: it carries the «por confirmar»
+ * marker, or it was left at 0 € (the same thing without the label). Section
+ * titles are not lines and never block anything.
+ *
+ * Pure and exported on purpose: the PDF export uses this to refuse sending an
+ * unfinished budget, so the rule lives in one place and is covered by tests.
+ */
+export function isPriceUnconfirmed(
+  row: Pick<EstimateRow, 'type' | 'price_snapshot' | 'service_name_snapshot'>
+): boolean {
+  if (row.type !== 'item') return false;
+  if ((row.service_name_snapshot ?? '').toLowerCase().includes(PRICE_TO_CONFIRM)) return true;
+  return !(typeof row.price_snapshot === 'number' && Number.isFinite(row.price_snapshot) && row.price_snapshot > 0);
+}
+
+/** The lines that make a budget unsendable, in document order. */
+export function unconfirmedRows<T extends Pick<EstimateRow, 'type' | 'price_snapshot' | 'service_name_snapshot'>>(
+  rows: T[]
+): T[] {
+  return rows.filter(isPriceUnconfirmed);
+}
