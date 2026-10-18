@@ -4,6 +4,7 @@ import { Estimate, EstimateRow, CatalogService, CatalogPhase, Client, CompanyPro
 import { DEFAULT_CATALOG } from '@/lib/default-catalog';
 import { IMPORT_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai';
 import { catalogKey } from '@/lib/catalog-key';
+import { CATALOG_PAGE_SIZE, CatalogPageWindow, catalogPageHasMore, catalogPageWindow, collectCatalogPages } from '@/lib/catalog-pages';
 import {
   ExistingService,
   ImportedServiceInput,
@@ -576,55 +577,129 @@ export async function getPendingCounts(): Promise<Record<string, number>> {
   return counts;
 }
 
-export async function searchCatalog(): Promise<CatalogService[]> {
+/** Internal shape: every row carries its section order so the list is sorted once. */
+type CatalogServiceWithOrder = CatalogService & { _phaseOrder: number };
+
+/** Phases keyed by id, so every partida can be labelled with its section name and order. */
+async function loadCatalogPhaseMap(): Promise<Map<string, { name: string; order: number }>> {
   const supabase = createClient();
-  
-  // Get phases in order
   const { data: phases } = await supabase
     .from('catalog_phases')
     .select('id, name, order_index')
     .order('order_index', { ascending: true });
-  
+
   const phaseMap = new Map<string, { name: string; order: number }>();
   (phases || []).forEach((p: { id: string; name: string; order_index: number }) => {
     phaseMap.set(p.id, { name: p.name, order: p.order_index });
   });
 
-  const { data, error } = await supabase
+  return phaseMap;
+}
+
+function toCatalogService(
+  row: Record<string, unknown>,
+  phaseMap: Map<string, { name: string; order: number }>
+): CatalogServiceWithOrder {
+  const phaseInfo = phaseMap.get(row.phase_id as string);
+
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    unit: row.unit as string,
+    base_price: row.base_price as number,
+    phase_id: row.phase_id as string,
+    phase_name: phaseInfo?.name || 'Sin categoría',
+    code: (row.code as string) ?? null,
+    description: (row.description as string) ?? null,
+    price_min: (row.price_min as number) ?? null,
+    price_max: (row.price_max as number) ?? null,
+    origin: (row.origin as string) ?? null,
+    price_source: (row.price_source as string) ?? null,
+    price_source_url: (row.price_source_url as string) ?? null,
+    price_reviewed_at: (row.price_reviewed_at as string) ?? null,
+    source_kind: (row.source_kind as PriceSourceKind) ?? null,
+    labour_hours: (row.labour_hours as number) ?? null,
+    labour_category: (row.labour_category as LabourCategory) ?? null,
+    material_anchor: (row.material_anchor as string) ?? null,
+    _phaseOrder: phaseInfo?.order ?? 999
+  };
+}
+
+/**
+ * One bounded read of `catalog_services`.
+ *
+ * Both readers below go through here on purpose: they must order rows identically, or the
+ * concatenated pages would repeat or skip partidas. `ORDER BY name, id` is what makes the
+ * order deterministic (61 partida names repeat in the real database). Returns `null` on a
+ * query error so the caller decides what an empty window means.
+ */
+async function fetchCatalogChunk(
+  window: CatalogPageWindow,
+  phaseMap: Map<string, { name: string; order: number }>
+): Promise<CatalogServiceWithOrder[] | null> {
+  const { data, error } = await createClient()
     .from('catalog_services')
-    .select('*');
-  
-  if (error) return [];
-  
-  const services = (data || []).map((s: Record<string, unknown>) => {
-    const phaseInfo = phaseMap.get(s.phase_id as string);
-    return {
-      id: s.id as string,
-      name: s.name as string,
-      unit: s.unit as string,
-      base_price: s.base_price as number,
-      phase_id: s.phase_id as string,
-      phase_name: phaseInfo?.name || 'Sin categoría',
-      code: (s.code as string) ?? null,
-      description: (s.description as string) ?? null,
-      price_min: (s.price_min as number) ?? null,
-      price_max: (s.price_max as number) ?? null,
-      origin: (s.origin as string) ?? null,
-      price_source: (s.price_source as string) ?? null,
-      price_source_url: (s.price_source_url as string) ?? null,
-      price_reviewed_at: (s.price_reviewed_at as string) ?? null,
-      source_kind: (s.source_kind as PriceSourceKind) ?? null,
-      labour_hours: (s.labour_hours as number) ?? null,
-      labour_category: (s.labour_category as LabourCategory) ?? null,
-      material_anchor: (s.material_anchor as string) ?? null,
-      _phaseOrder: phaseInfo?.order ?? 999,
-    };
+    .select('*')
+    .order('name', { ascending: true })
+    .order('id', { ascending: true })
+    .range(window.from, window.to);
+
+  if (error) {
+    console.error('Error loading catalog page', error);
+    return null;
+  }
+
+  return ((data || []) as Record<string, unknown>[]).map((row) => toCatalogService(row, phaseMap));
+}
+
+/** One page of the catalogue. */
+export interface CatalogPage {
+  services: CatalogService[];
+  /** Whether another page may exist after this one. */
+  hasMore: boolean;
+  /** Offset this page started at, to hand back in for the next one. */
+  offset: number;
+}
+
+/**
+ * Read ONE page of the company's catalogue.
+ *
+ * `ORDER BY name, id` is not decoration: paging without a deterministic order lets
+ * Postgres return the same row twice (or skip one) between requests. The display order
+ * (section, then name) is applied by `searchCatalog()`.
+ */
+export async function searchCatalogPage(offset = 0, limit = CATALOG_PAGE_SIZE): Promise<CatalogPage> {
+  const window = catalogPageWindow(offset, limit);
+  const phaseMap = await loadCatalogPhaseMap();
+
+  const services = await fetchCatalogChunk(window, phaseMap);
+
+  if (!services) {
+    return { services: [], hasMore: false, offset: window.offset };
+  }
+
+  return { services, hasMore: catalogPageHasMore(services.length, window.limit), offset: window.offset };
+}
+
+/**
+ * The whole catalogue, read in bounded pages.
+ *
+ * /catalog searches client-side and the editor's per-line picker lists every partida, so
+ * this still returns the full list — but it never asks Postgres for an unbounded result
+ * set, which is what keeps a big imported catalogue (thousands of partidas) cheap.
+ */
+export async function searchCatalog(): Promise<CatalogService[]> {
+  const phaseMap = await loadCatalogPhaseMap();
+
+  const services = await collectCatalogPages<CatalogServiceWithOrder>(async (window) => {
+    const chunk = await fetchCatalogChunk(window, phaseMap);
+    return chunk || [];
   });
-  
+
   // Sort by phase order, then by service name within each phase
   services.sort((a, b) => a._phaseOrder - b._phaseOrder || a.name.localeCompare(b.name));
-  
-  return services as CatalogService[];
+
+  return services;
 }
 
 /** Lo que hizo una importación, para contarlo en /catalog. */
