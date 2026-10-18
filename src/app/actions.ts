@@ -276,7 +276,12 @@ export async function getClients(): Promise<{ data: Client[] }> {
   return { data: (data || []) as Client[] };
 }
 
-/** One client and the obras that hang from it, newest first. */
+/**
+ * One client and the obras that hang from it, newest first.
+ *
+ * `rowCounts` says, per obra, how many lines it owns. The ficha only offers to delete
+ * an obra at zero, and the server re-checks the count before touching anything.
+ */
 export async function getClientWithEstimates(clientId: string) {
   const supabase = createClient();
 
@@ -294,7 +299,23 @@ export async function getClientWithEstimates(clientId: string) {
     .eq('client_id', clientId)
     .order('created_at', { ascending: false });
 
-  return { client: client as Client, estimates: (estimates || []) as Estimate[] };
+  const list = (estimates || []) as Estimate[];
+
+  // One `head` count per obra: no rows travel, and the number is exact (a plain
+  // `select('estimate_id')` would be capped by PostgREST's row limit and could make a
+  // written obra look empty).
+  const rowCounts: Record<string, number> = {};
+  await Promise.all(
+    list.map(async (estimate) => {
+      const { count } = await supabase
+        .from('estimate_rows')
+        .select('id', { count: 'exact', head: true })
+        .eq('estimate_id', estimate.id);
+      rowCounts[estimate.id] = count ?? 0;
+    })
+  );
+
+  return { client: client as Client, estimates: list, rowCounts };
 }
 
 /** Creates a client ficha. */
@@ -375,7 +396,8 @@ export async function updateClient(
 /**
  * Deletes a client ficha. Refused while it still owns obras: they are real
  * documents the client may already hold, and the foreign key would only drop the
- * link (ON DELETE SET NULL), leaving them orphaned with no way back.
+ * link (ON DELETE SET NULL), leaving them orphaned with no way back. An obra without
+ * lines is removed first with `deleteEstimate()`; anything written has to be moved.
  */
 export async function deleteClient(
   clientId: string
@@ -390,7 +412,7 @@ export async function deleteClient(
   if ((count ?? 0) > 0) {
     return {
       success: false,
-      error: `Este cliente tiene ${count} obra(s). Elimínalas o asígnalas a otro cliente antes de borrar la ficha.`,
+      error: `Este cliente tiene ${count} obra(s). Elimina las vacías o asígnalas a otro cliente antes de borrar la ficha.`,
     };
   }
 
@@ -398,6 +420,89 @@ export async function deleteClient(
   if (error) return { success: false, error: error.message };
 
   revalidatePath('/clients');
+  return { success: true };
+}
+
+/**
+ * Deletes an obra, but only while nothing hangs from it: no lines and no derived
+ * budgets.
+ *
+ * A budget with partidas is a document the client may already hold, so it is never
+ * removed from a mis-tap on a list; an empty one (created by accident, or re-created
+ * elsewhere) is pure noise on the ficha. `parent_estimate_id` is legacy (the
+ * modification flow no longer exists in `src/`), but its foreign key is still
+ * ON DELETE CASCADE, so a parent with children is refused instead of silently taking
+ * them down. Rows and pending notes do disappear with an empty obra: both are
+ * ON DELETE CASCADE by design.
+ *
+ * Scoped by `company_id` from the session, never by the id alone, and the delete only
+ * reports success when exactly one row came back.
+ */
+export async function deleteEstimate(
+  estimateId: string
+): Promise<{ success: true } | { success: false; error: string }> {
+  const supabase = createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: 'Sesión caducada. Vuelve a entrar.' };
+
+  const { data: userRecord } = await supabase
+    .from('users')
+    .select('company_id')
+    .eq('id', user.id)
+    .single();
+
+  if (!userRecord?.company_id) {
+    return { success: false, error: 'No se pudo identificar la empresa.' };
+  }
+
+  const { data: estimate, error: estimateError } = await supabase
+    .from('estimates')
+    .select('id, property_address, client_id')
+    .eq('id', estimateId)
+    .eq('company_id', userRecord.company_id)
+    .single();
+
+  if (estimateError || !estimate) return { success: false, error: 'No se encontró la obra.' };
+
+  const { count } = await supabase
+    .from('estimate_rows')
+    .select('id', { count: 'exact', head: true })
+    .eq('estimate_id', estimateId);
+
+  if ((count ?? 0) > 0) {
+    return {
+      success: false,
+      error: `«${estimate.property_address}» tiene ${count} partida(s): sólo se puede eliminar una obra vacía.`,
+    };
+  }
+
+  const { count: childCount } = await supabase
+    .from('estimates')
+    .select('id', { count: 'exact', head: true })
+    .eq('parent_estimate_id', estimateId);
+
+  if ((childCount ?? 0) > 0) {
+    return {
+      success: false,
+      error: `«${estimate.property_address}» tiene ${childCount} presupuesto(s) derivados: elimínalos primero.`,
+    };
+  }
+
+  const { data: deleted, error } = await supabase
+    .from('estimates')
+    .delete()
+    .eq('id', estimateId)
+    .eq('company_id', userRecord.company_id)
+    .select('id');
+
+  if (error) return { success: false, error: error.message };
+  if (!deleted || deleted.length !== 1) {
+    return { success: false, error: 'No se eliminó ninguna obra. Inténtalo de nuevo.' };
+  }
+
+  revalidatePath('/clients');
+  if (estimate.client_id) revalidatePath(`/clients/${estimate.client_id}`);
   return { success: true };
 }
 

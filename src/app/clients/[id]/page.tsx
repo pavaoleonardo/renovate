@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { createEstimate, getClientWithEstimates, getPendingCounts } from '@/app/actions';
 import ClientCard from '@/components/ClientCard';
+import DeleteObraButton from '@/components/DeleteObraButton';
 import { computeTotals } from '@/lib/estimate-totals';
 import { getStatusLabel } from '@/lib/estimate-status';
 import { Plus } from 'lucide-react';
@@ -21,7 +22,7 @@ function formatDate(dateStr?: string) {
 export default async function ClientDetailPage({ params }: { params: { id: string } }) {
   const payload = await getClientWithEstimates(params.id).catch(() => null);
   if (!payload) notFound();
-  const { client, estimates } = payload;
+  const { client, estimates, rowCounts } = payload;
 
   // The badge the old flat list used to show on each budget: a change captured in
   // the field («Cambios de esta obra») that nobody has turned into a line yet.
@@ -81,36 +82,52 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
               {estimates.map((e) => {
                 const st = getStatusLabel(e);
                 const totals = computeTotals(Number(e.subtotal_amount ?? e.total_amount) || 0, e.tax_rate);
+                const empty = rowCounts[e.id] === 0;
                 return (
-                  <Link
+                  <div
                     key={e.id}
-                    href={`/clients/${client.id}/estimates/${e.id}`}
-                    className="grid grid-cols-1 md:grid-cols-[80px_1.4fr_110px_140px_40px] gap-3 p-4 items-center hover:bg-blue-50/50 transition group"
+                    className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_104px] gap-3 p-4 items-center hover:bg-blue-50/50 transition group"
                   >
-                    <div className="text-xs font-bold text-zinc-400 hidden md:block">
-                      {formatDate(e.created_at)}
-                    </div>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-bold text-zinc-900 truncate">{e.property_address}</span>
-                      {pendingCounts[e.id] ? (
-                        <span
-                          title={`${pendingCounts[e.id]} cambio(s) de obra sin resolver`}
-                          className="shrink-0 text-[10px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded"
-                        >
-                          📝 {pendingCounts[e.id]}
+                    <Link
+                      href={`/clients/${client.id}/estimates/${e.id}`}
+                      className="grid grid-cols-1 md:grid-cols-[80px_1.4fr_110px_140px_40px] gap-3 items-center"
+                    >
+                      <div className="text-xs font-bold text-zinc-400 hidden md:block">
+                        {formatDate(e.created_at)}
+                      </div>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-bold text-zinc-900 truncate">{e.property_address}</span>
+                        {pendingCounts[e.id] ? (
+                          <span
+                            title={`${pendingCounts[e.id]} cambio(s) de obra sin resolver`}
+                            className="shrink-0 text-[10px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded"
+                          >
+                            📝 {pendingCounts[e.id]}
+                          </span>
+                        ) : null}
+                        {empty ? (
+                          <span
+                            title="Esta obra no tiene ninguna partida"
+                            className="shrink-0 text-[10px] font-black text-zinc-500 bg-zinc-100 px-1.5 py-0.5 rounded"
+                          >
+                            vacía
+                          </span>
+                        ) : null}
+                      </div>
+                      <div>
+                        <span className={`px-2.5 py-1 rounded-md text-[11px] font-black uppercase tracking-wide ${st.color}`}>
+                          {st.label}
                         </span>
-                      ) : null}
+                      </div>
+                      <div className="text-right tabular-nums font-extrabold text-zinc-900">{fmt(totals.total)}</div>
+                      <div className="text-blue-600 flex justify-end opacity-0 group-hover:opacity-100 transition font-bold text-sm">
+                        &rarr;
+                      </div>
+                    </Link>
+                    <div className="flex md:justify-end">
+                      {empty ? <DeleteObraButton estimateId={e.id} address={e.property_address} /> : null}
                     </div>
-                    <div>
-                      <span className={`px-2.5 py-1 rounded-md text-[11px] font-black uppercase tracking-wide ${st.color}`}>
-                        {st.label}
-                      </span>
-                    </div>
-                    <div className="text-right tabular-nums font-extrabold text-zinc-900">{fmt(totals.total)}</div>
-                    <div className="text-blue-600 flex justify-end opacity-0 group-hover:opacity-100 transition font-bold text-sm">
-                      &rarr;
-                    </div>
-                  </Link>
+                  </div>
                 );
               })}
             </div>
