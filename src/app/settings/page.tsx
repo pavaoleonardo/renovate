@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { CompanyProfile } from '@/types'
 import { Save, Building2, CheckCircle2, Upload, ImageIcon, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -21,6 +22,7 @@ export default function SettingsPage() {
   const [uploading, setUploading] = useState(false)
 
   const supabase = createClient()
+  const router = useRouter()
 
   useEffect(() => {
     fetch('/api/company')
@@ -41,6 +43,9 @@ export default function SettingsPage() {
     })
     setSaving(false)
     setSaved(true)
+    // The nav and the clients header are server-rendered: without this a freshly
+    // uploaded logo or a renamed company would only appear after a manual reload.
+    router.refresh()
     setTimeout(() => setSaved(false), 3000)
   }
 

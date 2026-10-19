@@ -4,6 +4,7 @@ import { addClient, getClients, getCompanyProfile, getEstimates } from '@/app/ac
 import { Estimate } from '@/types';
 import { computeTotals } from '@/lib/estimate-totals';
 import { ChevronRight, Plus, Users } from 'lucide-react';
+import CompanyBrand from '@/components/CompanyBrand';
 
 const fmt = (n: number) => n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 
@@ -55,9 +56,25 @@ export default async function ClientsPage({
 
   return (
     <div className="max-w-shell mx-auto py-12 px-4 sm:px-6 lg:px-8">
+      {/* Who is quoting: the company's logo and name, large, before the list. */}
+      {company && (
+        <div className="flex items-center gap-4 sm:gap-5 mb-8 pb-6 border-b border-zinc-200/80">
+          <CompanyBrand name={company.name} logoUrl={company.logo_url} size="lg" />
+          <div className="min-w-0">
+            <p className="text-2xl sm:text-3xl font-extrabold tracking-tight text-zinc-900 truncate">
+              {company.name}
+            </p>
+            {(company.cif || company.address) && (
+              <p className="text-sm text-zinc-500 font-medium mt-1 truncate">
+                {[company.cif, company.address].filter(Boolean).join(' · ')}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-between items-end mb-10 flex-col md:flex-row gap-6">
         <div>
-          {company && <p className="text-sm font-bold text-blue-600 uppercase tracking-widest mb-1">{company.name}</p>}
           <h1 className="text-4xl font-extrabold text-zinc-900 tracking-tight">Clientes</h1>
           <p className="text-zinc-500 mt-2 font-medium">
             Un cliente puede tener varias obras. Cada obra es un presupuesto con sus propias líneas.

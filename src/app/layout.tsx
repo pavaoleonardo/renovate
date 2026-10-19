@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { signOut } from './login/actions';
 import AuthSessionHandler from '@/components/AuthSessionHandler';
+import CompanyBrand from '@/components/CompanyBrand';
+import type { CompanyBrandInfo } from '@/types';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
@@ -26,6 +28,28 @@ export default async function RootLayout({
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
+  /**
+   * The company that owns the session, for the bar's brand. One embedded select
+   * through users.company_id → companies (the FK exists): the nav is rendered on
+   * every route, so it must not cost three round trips. If the lookup fails the
+   * bar keeps its wordmark — a missing name is better than a broken image.
+   */
+  let company: CompanyBrandInfo | null = null;
+  if (user) {
+    const { data, error } = await supabase
+      .from('users')
+      .select('company_id, companies(name, logo_url)')
+      .eq('id', user.id)
+      .single();
+
+    if (error) {
+      console.error('nav: company lookup failed', error.message);
+    } else {
+      const joined = data?.companies as CompanyBrandInfo | CompanyBrandInfo[] | null;
+      company = Array.isArray(joined) ? (joined[0] ?? null) : joined;
+    }
+  }
+
   return (
     <html lang="es" className={`${inter.variable} font-sans antialiased`}>
       <body className="bg-zinc-50 min-h-screen border-t-4 border-blue-600">
@@ -46,12 +70,27 @@ export default async function RootLayout({
               </div>
             )}
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+              {/* The company's own brand, next to (never instead of) RENOVATE. */}
+              {company?.name && (
+                <Link
+                  href="/clients"
+                  title={company.name}
+                  className="flex items-center gap-2 min-w-0 hover:opacity-80 transition"
+                >
+                  <CompanyBrand name={company.name} logoUrl={company.logo_url} />
+                  <span className="hidden sm:inline truncate max-w-[9rem] lg:max-w-[12rem] text-sm lg:text-base font-extrabold tracking-tight text-zinc-900">
+                    {company.name}
+                  </span>
+                </Link>
+              )}
               {user ? (
                 <form action={signOut}>
                   <button className="text-xs font-bold text-zinc-500 hover:text-red-600 border border-zinc-200 bg-white px-3 py-1.5 rounded-lg shadow-sm transition whitespace-nowrap">
-                    <span className="hidden sm:inline">Cerrar Sesión ({user.email})</span>
-                    <span className="sm:hidden">Salir</span>
+                    {/* The email only where there is room for it: the bar now also
+                        carries the company's name. */}
+                    <span className="hidden lg:inline">Cerrar Sesión ({user.email})</span>
+                    <span className="lg:hidden">Salir</span>
                   </button>
                 </form>
               ) : (

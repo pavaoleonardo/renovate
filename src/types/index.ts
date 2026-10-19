@@ -188,6 +188,13 @@ export interface CompanyProfile {
 }
 
 /**
+ * What the app chrome (nav and clients header) needs from the company: the name
+ * and the logo, nothing else. Kept separate from CompanyProfile so a layout can
+ * read two columns and stay honest about what it uses.
+ */
+export type CompanyBrandInfo = { name: string; logo_url: string | null };
+
+/**
  * Result of analysing an uploaded Excel on /catalog, shown BEFORE anything is
  * saved: which column was read as the price and what each line will become.
  */
