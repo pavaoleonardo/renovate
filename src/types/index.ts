@@ -330,6 +330,26 @@ export interface ExcelPreview {
    */
   ai: { suggestions: ImportMatchSuggestion[]; note: string } | null;
   /** Partidas the company already has in this catalog, the pool the lines match against. */
+  /**
+   * Qué líneas son partidas y cuáles no, decidido al analizar el documento. La vista
+   * previa lo enseña y `post` es lo que hay que devolver al confirmar para que el
+   * importador aplique exactamente lo aprobado (los índices de línea del documento).
+   */
+  review: {
+    /**
+     * `ai` = revisado por la IA; `rules` = sólo avisos evidentes; `rate-limited` / `error`
+     * = se intentó y no se pudo; `none` = no había líneas que revisar.
+     */
+    status: 'ai' | 'rules' | 'rate-limited' | 'error' | 'none';
+    /** Líneas que no se importarán, con su motivo («nota», «total», …). */
+    dropped: { name: string; section: string; reason: string }[];
+    /** Nombres completos de las partidas que venían partidas en dos filas. */
+    joined: string[];
+    /** Lo que el confirmar manda de vuelta (`review` en el FormData). */
+    post: { drop: { line: number; reason: string }[]; join: number[] };
+    /** Una frase de la IA, o por qué no hubo revisión. */
+    note: string;
+  };
   existingServices: number;
   totals: {
     phases: number;

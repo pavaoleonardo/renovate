@@ -27,8 +27,20 @@ import {
 } from '@/lib/catalog-import'
 import { bandSuggestedPrice, findMarketMatch, matchPhaseName, nameSimilarity } from '@/lib/catalog-match'
 import { nextServiceCode, phaseCodePrefix } from '@/lib/catalog-codes'
-import { AI_RATE_LIMIT_MESSAGE, IMPORT_AI_ENDPOINT, LAYOUT_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai'
+import { AI_RATE_LIMIT_MESSAGE, IMPORT_AI_ENDPOINT, LAYOUT_AI_ENDPOINT, REVIEW_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai'
 import { layoutDigest, layoutPrompt, validateLayoutAnswer, type LayoutVerdict } from '@/lib/import-layout-ai'
+import {
+  applyReview,
+  reviewCounts,
+  reviewDigest,
+  reviewLines,
+  reviewPrompt,
+  ruleReview,
+  sanitizeReview,
+  validateReview,
+  type ImportReview,
+  type ReviewLine
+} from '@/lib/import-review'
 import { parsePriceInput } from '@/lib/price-input'
 import { matchCatalogCase } from '@/lib/catalog-case'
 import { createClient } from '@/lib/supabase/server'
@@ -647,11 +659,101 @@ function decisionsFrom(formData: FormData): Record<string, 'merge' | 'new'> {
   }
 }
 
+/**
+ * La revisión que la vista previa enseñó y el usuario confirmó. Viaja como JSON porque
+ * los índices de línea son la única forma barata de que el confirmar aplique exactamente
+ * lo aprobado sin volver a preguntar a la IA (ni gastar otra llamada). Un payload roto
+ * significa «sin revisión»: se importa todo, que es lo que se hacía antes.
+ */
+function reviewFrom(formData: FormData): ImportReview {
+  const empty: ImportReview = { drop: [], join: [], aiUsed: false, note: '' }
+  const raw = formData.get('review')
+  if (typeof raw !== 'string' || !raw.trim()) return empty
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const drop = Array.isArray(parsed.drop)
+      ? parsed.drop
+          .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
+          .map((entry) => ({
+            line: Number(entry.line),
+            reason: typeof entry.reason === 'string' ? entry.reason.slice(0, 60) : 'nota'
+          }))
+          .filter((entry) => Number.isInteger(entry.line))
+      : []
+    const join = Array.isArray(parsed.join)
+      ? parsed.join.map(Number).filter((line) => Number.isInteger(line))
+      : []
+    return { drop, join, aiUsed: false, note: '' }
+  } catch {
+    return empty
+  }
+}
+
+/** Techo de líneas que se le mandan a la IA en la revisión: 300 ya son ~7k tokens. */
+const MAX_REVIEW_LINES = 300
+
+interface ImportReviewAnswer {
+  /** `none` = no había nada que revisar o no hay clave de OpenAI: no se gastó nada. */
+  status: 'ok' | 'none' | 'rate-limited' | 'error'
+  raw: unknown
+  note: string
+}
+
+/**
+ * Pregunta a la IA, en UNA llamada por documento, qué líneas son partidas y qué líneas
+ * son la segunda mitad de la anterior. No decide nada por su cuenta: `validateReview`
+ * filtra la respuesta antes de que toque el catálogo, y la vista previa la enseña.
+ */
+async function askImportReview(lines: ReviewLine[]): Promise<ImportReviewAnswer> {
+  if (!process.env.OPENAI_API_KEY) return { status: 'none', raw: null, note: '' }
+  const companyId = await getCompanyId()
+  if (!companyId) return { status: 'none', raw: null, note: '' }
+
+  const supabase = createClient()
+  if (await aiRateLimitReached(supabase, companyId, REVIEW_AI_ENDPOINT)) {
+    return { status: 'rate-limited', raw: null, note: AI_RATE_LIMIT_MESSAGE }
+  }
+  await recordAiCall(supabase, companyId, REVIEW_AI_ENDPOINT)
+
+  try {
+    // Temperatura baja: clasificar líneas no es redactar.
+    const raw = await askOpenAiJson<unknown>(reviewPrompt(reviewDigest(lines)), 0.1)
+    return { status: 'ok', raw, note: '' }
+  } catch {
+    // Sin detalle en el log: la respuesta de OpenAI puede traer fragmentos del digest.
+    console.error('La IA no pudo revisar las líneas del documento.')
+    return {
+      status: 'error',
+      raw: null,
+      note: 'La revisión con IA no está disponible ahora mismo: se importarán todas las líneas menos los avisos evidentes.'
+    }
+  }
+}
+
+
 export async function processExcelUpload(formData: FormData) {
   console.log('--- Iniciando procesamiento del documento ---')
   try {
     const document = await readDocument(formData)
-    const parsed = parseDocument(document.sheets, layoutOverrideFrom(formData))
+    let parsed = parseDocument(document.sheets, layoutOverrideFrom(formData))
+
+    /**
+     * La revisión que el usuario aprobó en la vista previa: avisos que no son partidas y
+     * descripciones que venían partidas en dos filas. Se aplica sobre las mismas líneas y
+     * con los mismos índices con los que se calcularon, y se vuelve a filtrar aquí: un
+     * navegador manipulado no puede borrar una partida real.
+     */
+    const lines = reviewLines(parsed.phases)
+    const review = sanitizeReview(reviewFrom(formData), lines)
+    const applied = applyReview(parsed.phases, review)
+    const counts = reviewCounts(applied.phases)
+    parsed = {
+      ...parsed,
+      phases: applied.phases,
+      pricedServices: counts.priced,
+      missingPrices: counts.missing
+    }
 
     const newPhases: Omit<CatalogPhase, 'id'>[] = parsed.phases.map(phase => ({ name: phase.name }))
     const phaseServicesMap: Record<number, ImportedServiceInput[]> = {}
@@ -728,6 +830,12 @@ export async function processExcelUpload(formData: FormData) {
     // Se cuenta lo que de verdad ha cambiado: importar en modo «añadir» sobre un
     // catálogo que ya tenía esas secciones no crea nada, y hay que decirlo.
     const parts = [`${summary.servicesCreated} partidas nuevas`]
+    if (applied.dropped.length > 0) {
+      parts.push(`${applied.dropped.length} líneas descartadas por no ser partidas`)
+    }
+    if (applied.joined.length > 0) {
+      parts.push(`${applied.joined.length} descripciones partidas en dos filas, unidas`)
+    }
     if (summary.phasesReused > 0) parts.push(`fusionadas en ${summary.phasesReused} secciones que ya tenías`)
     if (summary.phasesCreated > 0) parts.push(`${summary.phasesCreated} secciones nuevas`)
     if (summary.servicesMergedSimilar > 0) {
@@ -794,6 +902,42 @@ export async function previewExcelUpload(formData: FormData) {
         // La nota de la IA va delante: es la respuesta a «¿de dónde salen estos precios?».
         parsed.warnings.unshift(verdict.note)
       }
+    }
+
+    /**
+     * Qué líneas son partidas y cuáles no. Las reglas corren siempre (son gratis y
+     * deterministas: un aviso sin precio no es un trabajo); la IA, sólo en el primer
+     * análisis del documento y sólo si hay algo que mirar. Lo que se decide aquí es lo
+     * mismo que se aplicará al confirmar, porque la vista previa se lleva los índices.
+     */
+    const lines = reviewLines(parsed.phases)
+    const rules = ruleReview(lines)
+    let review = rules
+    let reviewStatus: ExcelPreview['review']['status'] = lines.length > 0 ? 'rules' : 'none'
+    let reviewNote = ''
+    if (formData.get('autoAi') === '1' && lines.length > 0 && lines.length <= MAX_REVIEW_LINES) {
+      const answer = await askImportReview(lines)
+      if (answer.status === 'ok') {
+        review = validateReview(answer.raw, lines, rules)
+        reviewStatus = 'ai'
+        reviewNote = review.note
+      } else if (answer.status === 'rate-limited' || answer.status === 'error') {
+        reviewStatus = answer.status
+        reviewNote = answer.note
+      }
+    } else if (formData.get('autoAi') === '1' && lines.length > MAX_REVIEW_LINES) {
+      // Un catálogo de mil líneas no cabe en una llamada razonable: se quedan las reglas,
+      // que ya quitan los avisos, y se dice por qué no hay revisión de la IA.
+      reviewNote = `El documento tiene ${lines.length} líneas: se han descartado los avisos evidentes, pero no se ha revisado con IA (el máximo por documento es ${MAX_REVIEW_LINES}).`
+    }
+
+    const applied = applyReview(parsed.phases, review)
+    const counts = reviewCounts(applied.phases)
+    parsed = {
+      ...parsed,
+      phases: applied.phases,
+      pricedServices: counts.priced,
+      missingPrices: counts.missing
     }
 
     // What each line becomes has to be decided against the company's own catalogue,
@@ -865,6 +1009,13 @@ export async function previewExcelUpload(formData: FormData) {
       matches: plan.matches,
       sections: plan.sections,
       ai,
+      review: {
+        status: reviewStatus,
+        dropped: applied.dropped,
+        joined: applied.joined,
+        post: { drop: review.drop, join: review.join },
+        note: reviewNote
+      },
       existingServices: targets.length,
       totals: {
         phases: parsed.phases.length,

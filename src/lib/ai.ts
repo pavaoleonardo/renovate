@@ -45,6 +45,13 @@ export const VOICE_AI_ENDPOINT = 'voice-change'
  */
 export const LAYOUT_AI_ENDPOINT = 'catalog-import-layout'
 
+/**
+ * Contador propio de «¿esta línea es una partida o un aviso?». Va aparte del de la
+ * importación porque es un gesto distinto —se gasta una vez por documento, al analizarlo—
+ * y no debe dejar al usuario sin cupo para las partidas dudosas.
+ */
+export const REVIEW_AI_ENDPOINT = 'catalog-import-review'
+
 /** El modelo que usan todas las funciones de IA. */
 const AI_MODEL = 'gpt-4o-mini'
 

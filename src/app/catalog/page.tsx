@@ -170,6 +170,12 @@ export default function CatalogPage() {
   const [decisions, setDecisions] = useState<Record<string, 'merge' | 'new'>>({})
   /** Fill the partidas the document leaves without a price with the market-band estimate. */
   const [fillMissing, setFillMissing] = useState(true)
+  /**
+   * «Importar también las líneas que la revisión ha descartado». Desmarcado por defecto:
+   * lo normal es que un aviso («No está incluido el suministro de caldera») no sea una
+   * partida. Marcarlo es la salida para quien quiera el documento tal cual venía.
+   */
+  const [includeDropped, setIncludeDropped] = useState(false)
   /** What the AI answered about the doubtful lines, and whether it was asked. */
   const [matchNote, setMatchNote] = useState<string | null>(null)
   const [matchBusy, setMatchBusy] = useState(false)
@@ -266,6 +272,8 @@ export default function CatalogPage() {
       setBusy(true)
       setBusyLabel(options.autoAi ? 'Leyendo el documento y preguntando a la IA…' : 'Volviendo a leer el documento…')
       setResult(null)
+      // Cada análisis es una revisión nueva: lo que se había marcado del anterior no vale.
+      setIncludeDropped(false)
 
       const formData = new FormData()
       formData.append('file', selected)
@@ -345,6 +353,12 @@ export default function CatalogPage() {
     if (noPrices) formData.append('noPrices', '1')
     formData.append('fillMissing', fillMissing ? '1' : '0')
     if (Object.keys(decisions).length > 0) formData.append('decisions', JSON.stringify(decisions))
+    // La revisión aprobada viaja con los índices que enseñó la vista previa: son los
+    // mismos que el servidor vuelve a leer del archivo, así que se aplica lo que se vio.
+    if (preview) {
+      const review = includeDropped ? { ...preview.review.post, drop: [] } : preview.review.post
+      formData.append('review', JSON.stringify(review))
+    }
 
     const res = await processExcelUpload(formData).catch(() => null)
     setBusy(false)
@@ -358,6 +372,7 @@ export default function CatalogPage() {
       setNoPrices(false)
       setDecisions({})
       setMatchNote(null)
+      setIncludeDropped(false)
       setResult({ success: true, text: res.message || 'Documento importado.' })
       await fetchCatalog()
     } else {
@@ -933,6 +948,72 @@ export default function CatalogPage() {
                   />
                   Importar sin precio
                 </label>
+              {/**
+               * Qué líneas son partidas y cuáles no. Es la diferencia entre importar un
+               * catálogo y importar además los veinte avisos «No está incluido…» como
+               * partidas a 0,00 €. Nada se descarta sin enseñarlo: se listan las líneas y
+               * se pueden importar igual.
+               */}
+              {preview.review.status !== 'none' &&
+                (preview.review.dropped.length > 0 || preview.review.joined.length > 0 || preview.review.note) && (
+                  <div className="p-3 bg-amber-50/70 border-b border-amber-100 space-y-2">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <p className="text-xs font-bold text-amber-900">
+                        Se {preview.totals.services + (includeDropped ? preview.review.dropped.length : 0) === 1 ? 'importará' : 'importarán'}{' '}
+                        {preview.totals.services + (includeDropped ? preview.review.dropped.length : 0)}{' '}
+                        {preview.totals.services + (includeDropped ? preview.review.dropped.length : 0) === 1 ? 'partida' : 'partidas'} de{' '}
+                        {preview.totals.services + preview.review.dropped.length + preview.review.joined.length} líneas.
+                      </p>
+                      <span className="text-[10px] font-black uppercase tracking-wide text-amber-700">
+                        {preview.review.status === 'ai' ? 'Revisado con IA' : 'Revisión automática'}
+                      </span>
+                    </div>
+
+                    {preview.review.dropped.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-bold text-amber-900">
+                          {preview.review.dropped.length}{' '}
+                          {preview.review.dropped.length === 1 ? 'línea no es una partida' : 'líneas no son partidas'} (avisos,
+                          condiciones y totales):
+                        </p>
+                        <p className="text-[11px] text-amber-800 leading-snug">
+                          {preview.review.dropped
+                            .slice(0, 5)
+                            .map((entry) => `«${entry.name}»`)
+                            .join(' · ')}
+                          {preview.review.dropped.length > 5
+                            ? ` y ${preview.review.dropped.length - 5} más`
+                            : ''}
+                        </p>
+                        <label className="flex items-center gap-2 text-[11px] font-medium text-amber-900">
+                          <input
+                            type="checkbox"
+                            checked={includeDropped}
+                            onChange={(e) => setIncludeDropped(e.target.checked)}
+                            disabled={busy}
+                          />
+                          Importar también las {preview.review.dropped.length} líneas descartadas
+                        </label>
+                      </div>
+                    )}
+
+                    {preview.review.joined.length > 0 && (
+                      <p className="text-[11px] font-medium text-amber-800">
+                        {preview.review.joined.length}{' '}
+                        {preview.review.joined.length === 1 ? 'descripción venía partida' : 'descripciones venían partidas'} en dos
+                        filas y se {preview.review.joined.length === 1 ? 'ha unido' : 'han unido'} en una partida: «
+                        {preview.review.joined[0]}»
+                        {preview.review.joined.length > 1 ? ` y ${preview.review.joined.length - 1} más` : ''}.
+                      </p>
+                    )}
+
+                    {preview.review.note && (
+                      <p className="text-[11px] font-medium text-amber-800">{preview.review.note}</p>
+                    )}
+                  </div>
+                )}
+
+
               </div>
 
               {/* Revisión: qué línea ya está en el catálogo, cuál se parece y cuál es nueva. */}
