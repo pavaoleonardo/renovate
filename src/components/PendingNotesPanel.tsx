@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from 'react';
 import { PendingNote } from '@/types';
 import { Check, Trash2 } from 'lucide-react';
+import ConstructionLoader from '@/components/ConstructionLoader';
 
 /**
  * "Cambios de esta obra": the changes captured while the work is going on.
@@ -20,6 +22,23 @@ export default function PendingNotesPanel({
   onConvert: (note: PendingNote) => void | Promise<void>;
   onDismiss: (note: PendingNote) => void | Promise<void>;
 }) {
+  /**
+   * The note whose conversion/dismissal is in flight. Converting writes a line into
+   * the budget, so the button must say so — and a second click on the same note must
+   * not enqueue it twice.
+   */
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const run = async (note: PendingNote, action: (note: PendingNote) => void | Promise<void>) => {
+    if (busyId) return;
+    setBusyId(note.id);
+    try {
+      await action(note);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-8">
       <div className="flex items-center justify-between gap-3 mb-2">
@@ -46,17 +65,23 @@ export default function PendingNotesPanel({
               </span>
               <button
                 type="button"
-                onClick={() => onConvert(note)}
+                onClick={() => run(note, onConvert)}
+                disabled={busyId === note.id}
                 title="Convertir en una línea del presupuesto"
-                className="shrink-0 flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded-md transition"
+                className="shrink-0 flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded-md transition disabled:opacity-60 disabled:cursor-progress"
               >
-                <Check size={14} /> Convertir
+                {busyId === note.id ? (
+                  <ConstructionLoader variant="crane" size="sm" label="Convirtiendo…" />
+                ) : (
+                  <><Check size={14} /> Convertir</>
+                )}
               </button>
               <button
                 type="button"
-                onClick={() => onDismiss(note)}
+                onClick={() => run(note, onDismiss)}
+                disabled={busyId === note.id}
                 title="Descartar"
-                className="shrink-0 p-1 text-zinc-400 hover:text-red-500 transition"
+                className="shrink-0 p-1 text-zinc-400 hover:text-red-500 transition disabled:opacity-60 disabled:cursor-progress"
               >
                 <Trash2 size={15} />
               </button>

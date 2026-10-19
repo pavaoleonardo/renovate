@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import { createEstimate, getClientWithEstimates, getPendingCounts } from '@/app/actions';
 import ClientCard from '@/components/ClientCard';
 import DeleteObraButton from '@/components/DeleteObraButton';
+import SubmitButton from '@/components/SubmitButton';
 import { computeTotals } from '@/lib/estimate-totals';
 import { getStatusLabel } from '@/lib/estimate-status';
 import { Plus } from 'lucide-react';
@@ -63,12 +64,12 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
                 placeholder="Dirección de la obra..."
                 className="px-3 py-2 bg-zinc-50 border-transparent rounded-lg text-sm font-medium text-zinc-900 focus:bg-white focus:ring-2 focus:ring-blue-100 outline-none"
               />
-              <button
-                type="submit"
-                className="shrink-0 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-4 py-2 rounded-lg font-bold text-sm shadow transition whitespace-nowrap"
+              <SubmitButton
+                pendingLabel="Creando la obra…"
+                className="shrink-0 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-4 py-2 rounded-lg font-bold text-sm shadow transition whitespace-nowrap disabled:bg-blue-400"
               >
                 <Plus size={16} /> Nueva obra
-              </button>
+              </SubmitButton>
             </form>
           </div>
 

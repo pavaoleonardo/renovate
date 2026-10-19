@@ -5,6 +5,7 @@ import { Estimate } from '@/types';
 import { computeTotals } from '@/lib/estimate-totals';
 import { ChevronRight, Plus, Users } from 'lucide-react';
 import CompanyBrand from '@/components/CompanyBrand';
+import SubmitButton from '@/components/SubmitButton';
 
 const fmt = (n: number) => n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 
@@ -104,12 +105,12 @@ export default async function ClientsPage({
             placeholder="Teléfono..."
             className="flex-1 min-w-[110px] px-3 py-2 bg-zinc-50 border-transparent rounded-lg text-sm focus:ring-2 focus:ring-blue-100 outline-none font-medium text-zinc-900"
           />
-          <button
-            type="submit"
-            className="shrink-0 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-5 py-2.5 rounded-lg font-bold shadow transition flex items-center gap-2 whitespace-nowrap"
+          <SubmitButton
+            pendingLabel="Creando…"
+            className="shrink-0 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-5 py-2.5 rounded-lg font-bold shadow transition flex items-center gap-2 whitespace-nowrap disabled:bg-blue-400"
           >
             <Plus size={16} /> Nuevo cliente
-          </button>
+          </SubmitButton>
         </form>
       </div>
 

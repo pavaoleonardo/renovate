@@ -1,5 +1,6 @@
 import { forgotPassword } from '../actions'
 import Link from 'next/link'
+import SubmitButton from '@/components/SubmitButton'
 
 export default function ForgotPasswordPage({
   searchParams,
@@ -47,12 +48,13 @@ export default function ForgotPasswordPage({
             Te enviaremos un enlace para restablecer tu contraseña.
           </p>
 
-          <button
+          <SubmitButton
             formAction={forgotPassword}
-            className="bg-blue-600 active:scale-[0.98] hover:bg-blue-700 text-white font-bold px-4 py-3 rounded-xl shadow-md transition mb-2"
+            pendingLabel="Enviando el correo…"
+            className="bg-blue-600 active:scale-[0.98] hover:bg-blue-700 text-white font-bold px-4 py-3 rounded-xl shadow-md transition mb-2 disabled:bg-blue-400"
           >
             Enviar enlace de recuperación
-          </button>
+          </SubmitButton>
 
           <Link
             href="/login"

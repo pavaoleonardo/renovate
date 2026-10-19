@@ -1,6 +1,7 @@
 import { login } from './actions'
 import Link from 'next/link'
 import PasswordInput from '@/components/PasswordInput'
+import SubmitButton from '@/components/SubmitButton'
 
 export default function LoginPage({
   searchParams,
@@ -46,12 +47,13 @@ export default function LoginPage({
           </Link>
         </div>
 
-        <button
+        <SubmitButton
           formAction={login}
-          className="bg-blue-600 active:scale-[0.98] hover:bg-blue-700 text-white font-bold px-4 py-3 rounded-xl shadow-md transition mb-2"
+          pendingLabel="Comprobando…"
+          className="bg-blue-600 active:scale-[0.98] hover:bg-blue-700 text-white font-bold px-4 py-3 rounded-xl shadow-md transition mb-2 disabled:bg-blue-400"
         >
           Iniciar Sesión
-        </button>
+        </SubmitButton>
         <Link
           href="/login/signup"
           className="bg-zinc-100 active:scale-[0.98] hover:bg-zinc-200 text-zinc-900 font-bold px-4 py-3 rounded-xl transition mb-2 text-center"

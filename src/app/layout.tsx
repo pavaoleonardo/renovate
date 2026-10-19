@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server';
 import { signOut } from './login/actions';
 import AuthSessionHandler from '@/components/AuthSessionHandler';
 import CompanyBrand from '@/components/CompanyBrand';
+import SubmitButton from '@/components/SubmitButton';
 import type { CompanyBrandInfo } from '@/types';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
@@ -86,12 +87,16 @@ export default async function RootLayout({
               )}
               {user ? (
                 <form action={signOut}>
-                  <button className="text-xs font-bold text-zinc-500 hover:text-red-600 border border-zinc-200 bg-white px-3 py-1.5 rounded-lg shadow-sm transition whitespace-nowrap">
+                  <SubmitButton
+                    pendingLabel="Saliendo…"
+                    tone="light"
+                    className="text-xs font-bold text-zinc-500 hover:text-red-600 border border-zinc-200 bg-white px-3 py-1.5 rounded-lg shadow-sm transition whitespace-nowrap"
+                  >
                     {/* The email only where there is room for it: the bar now also
                         carries the company's name. */}
                     <span className="hidden lg:inline">Cerrar Sesión ({user.email})</span>
                     <span className="lg:hidden">Salir</span>
-                  </button>
+                  </SubmitButton>
                 </form>
               ) : (
                 <Link href="/login" className="text-sm font-bold bg-blue-50 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-100 transition shadow-sm">

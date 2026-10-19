@@ -18,9 +18,14 @@ import { MANUAL_PRICE_SOURCE, SOURCE_KIND_LABELS, formatReviewDate, isPriceStale
 import { parsePriceInput } from '@/lib/price-input'
 import { hasMarketBand } from '@/lib/market-band'
 import { AlertCircle, CheckCircle2, Box, Download, Plus, RefreshCw, Search, Sparkles, Trash2, UploadCloud, X } from 'lucide-react'
+import ConstructionLoader from '@/components/ConstructionLoader'
+import LoadingOverlay from '@/components/LoadingOverlay'
 import { CatalogService, ExcelPreview, ExcelPreviewMatch } from '@/types'
 
 const UNITS = ['m2', 'ml', 'm3', 'ud', 'kg', 'h', 'vg']
+
+/** Fixed widths for the loading skeleton: a random one would clash between renders. */
+const CATALOG_SKELETON_WIDTHS = ['w-1/2', 'w-2/5', 'w-3/5', 'w-1/3', 'w-1/2', 'w-2/5']
 
 const eur = (value: number) =>
   value.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 })
@@ -143,6 +148,12 @@ export default function CatalogPage() {
   const [phases, setPhases] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  /**
+   * Text of the full-screen wait while a document is analysed, imported, or the whole
+   * catalogue is seeded/replaced. `null` means «no overlay»: a one-row save gets its
+   * loader inside its own button instead of covering the page.
+   */
+  const [busyLabel, setBusyLabel] = useState<string | null>(null)
   const [file, setFile] = useState<File | null>(null)
   /** Añadir es el modo por defecto: subir un documento no puede borrar el catálogo. */
   const [importMode, setImportMode] = useState<'replace' | 'merge'>('merge')
@@ -195,10 +206,17 @@ export default function CatalogPage() {
 
   const runSeed = async (mode: 'merge' | 'replace') => {
     setBusy(true)
+    setBusyLabel(mode === 'replace' ? 'Reemplazando tu catálogo…' : 'Añadiendo el catálogo por defecto…')
     setResult(null)
-    const res = await seedDefaultCatalog({ mode })
+    const res = await seedDefaultCatalog({ mode }).catch(() => null)
     setBusy(false)
+    setBusyLabel(null)
     setSeedStep(null)
+
+    if (!res) {
+      setResult({ success: false, text: 'No se pudo cargar el catálogo por defecto. Revisa tu conexión.' })
+      return
+    }
 
     if (!res.success) {
       setResult({ success: false, text: res.error || 'No se pudo cargar el catálogo por defecto.' })
@@ -246,6 +264,7 @@ export default function CatalogPage() {
   const analyse = useCallback(
     async (selected: File, options: { priceCol: number | null; noPrices: boolean; autoAi?: boolean }) => {
       setBusy(true)
+      setBusyLabel(options.autoAi ? 'Leyendo el documento y preguntando a la IA…' : 'Volviendo a leer el documento…')
       setResult(null)
 
       const formData = new FormData()
@@ -257,8 +276,15 @@ export default function CatalogPage() {
       // otra columna de precio no vuelve a preguntar (y no gasta otra llamada).
       if (options.autoAi) formData.append('autoAi', '1')
 
-      const res = await previewExcelUpload(formData)
+      const res = await previewExcelUpload(formData).catch(() => null)
       setBusy(false)
+      setBusyLabel(null)
+
+      if (!res) {
+        setPreview(null)
+        setResult({ success: false, text: 'No se pudo leer el documento. Revisa tu conexión e inténtalo de nuevo.' })
+        return
+      }
 
       if (!res.success) {
         setPreview(null)
@@ -309,6 +335,7 @@ export default function CatalogPage() {
     e.preventDefault()
     if (!file) return
     setBusy(true)
+    setBusyLabel('Importando las partidas…')
     setResult(null)
 
     const formData = new FormData()
@@ -319,9 +346,12 @@ export default function CatalogPage() {
     formData.append('fillMissing', fillMissing ? '1' : '0')
     if (Object.keys(decisions).length > 0) formData.append('decisions', JSON.stringify(decisions))
 
-    const res = await processExcelUpload(formData)
+    const res = await processExcelUpload(formData).catch(() => null)
     setBusy(false)
-    if (res.success) {
+    setBusyLabel(null)
+    if (!res) {
+      setResult({ success: false, text: 'No se pudo importar el documento. Revisa tu conexión e inténtalo de nuevo.' })
+    } else if (res.success) {
       setFile(null)
       setPreview(null)
       setPriceCol(null)
@@ -367,8 +397,13 @@ export default function CatalogPage() {
     if (priceCol !== null) formData.append('priceCol', String(priceCol))
     if (noPrices) formData.append('noPrices', '1')
 
-    const res = await suggestItemMatches(formData)
+    const res = await suggestItemMatches(formData).catch(() => null)
     setMatchBusy(false)
+
+    if (!res) {
+      setMatchNote('No se pudo consultar la IA. Revisa tu conexión e inténtalo de nuevo.')
+      return
+    }
 
     if (!res.success) {
       setMatchNote(res.error || 'No se pudo consultar la IA.')
@@ -527,6 +562,10 @@ export default function CatalogPage() {
 
   return (
     <div className="max-w-shell mx-auto py-12 px-4 sm:px-6 lg:px-8">
+      {/* A job that owns the page (read the Excel, import, seed) blocks the screen: it is
+          also what stops a second click from starting the same import twice. */}
+      {busyLabel && <LoadingOverlay label={busyLabel} hint="El trabajo se hace en el servidor: no cierres esta pestaña." />}
+
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-extrabold text-zinc-900 tracking-tight flex items-center gap-3">
@@ -534,7 +573,7 @@ export default function CatalogPage() {
           </h1>
           <p className="text-zinc-500 mt-2 font-medium">
             {loading
-              ? 'Cargando…'
+              ? 'Preparando tu catálogo…'
               : term
                 ? `${visible.length} de ${services.length} partidas para «${query.trim()}»`
                 : `${services.length} partidas en ${Object.keys(grouped).length} secciones`}
@@ -744,9 +783,13 @@ export default function CatalogPage() {
           <button
             onClick={handleAddService}
             disabled={busy}
-            className="h-[42px] bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-300 text-white px-5 rounded-lg font-bold text-sm transition active:scale-95"
+            className="h-[42px] inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-500 text-white px-5 rounded-lg font-bold text-sm transition active:scale-95 disabled:cursor-progress"
           >
-            Añadir
+            {busy ? (
+              <ConstructionLoader variant="crane" size="sm" tone="invert" label="Añadiendo…" />
+            ) : (
+              'Añadir'
+            )}
           </button>
         </div>
       )}
@@ -945,10 +988,15 @@ export default function CatalogPage() {
                         type="button"
                         onClick={handleAskAi}
                         disabled={busy || matchBusy}
-                        className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-300 rounded px-2 py-1 transition"
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-500 rounded px-2 py-1 transition disabled:cursor-progress"
                       >
-                        <Sparkles size={12} />
-                        {matchBusy ? 'Consultando…' : 'Volver a preguntar a la IA'}
+                        {matchBusy ? (
+                          <ConstructionLoader variant="level" size="sm" tone="invert" label="Consultando…" />
+                        ) : (
+                          <>
+                            <Sparkles size={12} /> Volver a preguntar a la IA
+                          </>
+                        )}
                       </button>
                     </div>
 
@@ -1120,9 +1168,15 @@ export default function CatalogPage() {
           <button
             onClick={handleUpload}
             disabled={!file || !preview || busy}
-            className="w-full bg-zinc-900 disabled:bg-zinc-300 hover:bg-black text-white px-6 py-3 rounded-xl font-bold transition active:scale-[0.99]"
+            className="w-full inline-flex items-center justify-center gap-2 bg-zinc-900 disabled:bg-zinc-500 hover:bg-black text-white px-6 py-3 rounded-xl font-bold transition active:scale-[0.99] disabled:cursor-progress"
           >
-            {busy ? 'Procesando…' : preview ? 'Confirmar importación' : 'Importar documento'}
+            {busy ? (
+              <ConstructionLoader variant="crane" size="sm" tone="invert" label="Procesando…" />
+            ) : preview ? (
+              'Confirmar importación'
+            ) : (
+              'Importar documento'
+            )}
           </button>
           <p className="text-[11px] text-zinc-400 leading-snug">
             Se leen <strong>todas las hojas</strong> del archivo, no sólo la primera. El precio se busca por la cabecera
@@ -1148,7 +1202,18 @@ export default function CatalogPage() {
       </div>
 
       {loading ? (
-        <div className="p-8 text-center text-zinc-500 font-medium animate-pulse">Cargando catálogo…</div>
+        <div className="bg-white rounded-2xl border border-zinc-100 p-8">
+          <ConstructionLoader variant="wall" size="lg" label="Colocando tus partidas…" />
+          <div className="mt-6 space-y-2.5">
+            {CATALOG_SKELETON_WIDTHS.map((width, index) => (
+              <div key={index} className="flex items-center gap-3">
+                <span className="h-3 w-12 shrink-0 rounded bg-zinc-100 animate-pulse" />
+                <span className={`h-3 rounded bg-zinc-100 animate-pulse ${width}`} />
+                <span className="ml-auto h-3 w-14 shrink-0 rounded bg-zinc-100 animate-pulse" />
+              </div>
+            ))}
+          </div>
+        </div>
       ) : services.length === 0 ? (
         <div className="bg-white rounded-2xl border border-zinc-100 p-12 text-center">
           <p className="text-zinc-500 font-medium">Tu catálogo está vacío.</p>

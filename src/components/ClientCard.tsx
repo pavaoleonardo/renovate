@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Client } from '@/types';
 import { deleteClient, updateClient } from '@/app/actions';
 import AutoGrowTextarea from './AutoGrowTextarea';
+import ConstructionLoader from './ConstructionLoader';
 import { CheckCircle2, Save, Trash2 } from 'lucide-react';
 
 const inputClass =
@@ -99,9 +100,13 @@ export default function ClientCard({ client }: { client: Client }) {
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-2 bg-zinc-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold text-sm transition disabled:opacity-50"
+          className="flex items-center gap-2 bg-zinc-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold text-sm transition disabled:bg-zinc-700 disabled:cursor-progress"
         >
-          <Save size={16} /> {saving ? 'Guardando...' : 'Guardar ficha'}
+          {saving ? (
+            <ConstructionLoader variant="crane" size="sm" tone="invert" label="Guardando…" />
+          ) : (
+            <><Save size={16} /> Guardar ficha</>
+          )}
         </button>
         {saved && (
           <span className="flex items-center gap-1 text-xs font-bold text-green-600">
@@ -112,9 +117,13 @@ export default function ClientCard({ client }: { client: Client }) {
           onClick={handleDelete}
           disabled={deleting}
           title="Solo se puede borrar un cliente sin obras"
-          className="ml-auto flex items-center gap-2 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-4 py-2 rounded-lg font-bold text-sm transition disabled:opacity-50"
+          className="ml-auto flex items-center gap-2 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-4 py-2 rounded-lg font-bold text-sm transition disabled:opacity-60 disabled:cursor-progress"
         >
-          <Trash2 size={16} /> {deleting ? 'Eliminando...' : 'Eliminar'}
+          {deleting ? (
+            <ConstructionLoader variant="wall" size="sm" label="Eliminando…" />
+          ) : (
+            <><Trash2 size={16} /> Eliminar</>
+          )}
         </button>
       </div>
     </div>

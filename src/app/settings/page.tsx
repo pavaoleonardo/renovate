@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { CompanyProfile } from '@/types'
 import { Save, Building2, CheckCircle2, Upload, ImageIcon, Trash2 } from 'lucide-react'
+import ConstructionLoader from '@/components/ConstructionLoader'
 import { createClient } from '@/lib/supabase/client'
 
 export default function SettingsPage() {
@@ -90,7 +91,8 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-        <div className="animate-pulse space-y-4">
+        <ConstructionLoader variant="mixer" size="lg" label="Cargando los datos de tu empresa…" />
+        <div className="animate-pulse space-y-4 mt-6">
           <div className="h-8 bg-zinc-200 rounded w-48"></div>
           <div className="h-64 bg-zinc-100 rounded-xl"></div>
         </div>
@@ -146,8 +148,8 @@ export default function SettingsPage() {
               )}
             </div>
             {uploading && (
-              <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
-                <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              <div className="absolute inset-0 bg-white/85 flex items-center justify-center">
+                <ConstructionLoader variant="mixer" size="md" />
               </div>
             )}
           </div>
@@ -229,12 +231,12 @@ export default function SettingsPage() {
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-2 bg-zinc-900 hover:bg-black disabled:bg-zinc-300 text-white px-8 py-3 rounded-xl font-bold transition shadow-md text-sm active:scale-95"
+            className="flex items-center gap-2 bg-zinc-900 hover:bg-black disabled:bg-zinc-700 disabled:cursor-progress text-white px-8 py-3 rounded-xl font-bold transition shadow-md text-sm active:scale-95"
           >
             {saved ? (
               <><CheckCircle2 size={18} /> Guardado</>
             ) : saving ? (
-              'Guardando...'
+              <ConstructionLoader variant="crane" size="sm" tone="invert" label="Guardando…" />
             ) : (
               <><Save size={18} /> Guardar Cambios</>
             )}

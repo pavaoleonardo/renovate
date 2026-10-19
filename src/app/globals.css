@@ -24,6 +24,101 @@ input[type="number"] {
   color: #1e3a8a;
 }
 
+/* ---------------------------------------------------------------------------
+   Construction-themed loaders (src/components/ConstructionLoader.tsx).
+
+   Each one animates a material instead of a generic spinner: bricks being laid,
+   a crane lifting, the bubble of a spirit level, a turning mixer. Pure CSS, so
+   they cost no timers and no JavaScript; `prefers-reduced-motion` leaves them
+   as a still picture. The colours come from the variables set by `.cl-loader`
+   (dark steel + terracotta on white) and `.cl-loader-invert` (white + amber on
+   a dark or blue button).
+--------------------------------------------------------------------------- */
+.cl-loader {
+  --cl-line: #a1a1aa;
+  --cl-solid: #d4d4d8;
+  --cl-mortar: #ece2d6;
+  --cl-accent: #b4543a;
+}
+
+.cl-loader-invert {
+  --cl-line: rgba(255, 255, 255, 0.9);
+  --cl-solid: rgba(255, 255, 255, 0.55);
+  --cl-mortar: rgba(255, 255, 255, 0.22);
+  --cl-accent: #fbbf24;
+}
+
+.cl-brick {
+  animation: cl-brick 2.5s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+@keyframes cl-brick {
+  0%,
+  4% {
+    opacity: 0;
+    transform: translateY(-10%) scaleY(0.6);
+  }
+  18%,
+  74% {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+  90%,
+  100% {
+    opacity: 0;
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+.cl-crane-hook {
+  animation: cl-crane-hook 2.2s ease-in-out infinite;
+}
+@keyframes cl-crane-hook {
+  0%,
+  100% {
+    transform: translateY(18%);
+  }
+  45%,
+  62% {
+    transform: translateY(-4%);
+  }
+}
+
+.cl-level-bubble {
+  animation: cl-level-bubble 2.6s ease-in-out infinite;
+}
+@keyframes cl-level-bubble {
+  0% {
+    transform: translateX(-130%);
+  }
+  50% {
+    transform: translateX(130%);
+  }
+  100% {
+    transform: translateX(-130%);
+  }
+}
+
+.cl-mixer-drum {
+  animation: cl-mixer-drum 1.3s linear infinite;
+  transform-origin: 50% 50%;
+}
+@keyframes cl-mixer-drum {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cl-brick,
+  .cl-crane-hook,
+  .cl-level-bubble,
+  .cl-mixer-drum {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
 /* Print styles: Final fix for clean PDF output */
 @media print {
   /* Ocultar el editor, la navegación y elementos de la interfaz */

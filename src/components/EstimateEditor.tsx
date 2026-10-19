@@ -10,6 +10,7 @@ import { catalogKey } from '@/lib/catalog-key';
 import EstimatePDFPreview from './EstimatePDFPreview';
 import AutoGrowTextarea from './AutoGrowTextarea';
 import PendingNotesPanel from './PendingNotesPanel';
+import ConstructionLoader from './ConstructionLoader';
 import VoiceChangeCapture from './VoiceChangeCapture';
 import { pendingToRow } from '@/lib/pending-notes';
 import { applyVoiceOps } from '@/lib/voice-change';
@@ -471,7 +472,7 @@ export default function EstimateEditor({
               >
                 + Nuevo cliente
               </button>
-              {clientBusy && <span className="text-[10px] font-bold text-zinc-400">guardando…</span>}
+              {clientBusy && <ConstructionLoader variant="crane" size="sm" />}
             </div>
             {clientError && <p className="text-[10px] font-bold text-red-500 px-2 mt-1">{clientError}</p>}
             {showNewClient && (
@@ -556,8 +557,9 @@ export default function EstimateEditor({
                   ))}
                 </select>
               </div>
-              <p className="text-[10px] font-medium text-zinc-400 mt-1">
-                {taxHint(totals.taxRate)}{isSavingTax ? ' · guardando...' : ''}
+              <p className="text-[10px] font-medium text-zinc-400 mt-1 inline-flex items-center gap-1.5">
+                {taxHint(totals.taxRate)}
+                {isSavingTax && <ConstructionLoader variant="level" size="sm" />}
               </p>
               {taxError && (
                 <p className="text-[10px] font-bold text-red-500 mt-1 max-w-[260px] text-right">{taxError}</p>
@@ -817,7 +819,13 @@ export default function EstimateEditor({
                 }`}
               >
                 <Sparkles size={16} />
-                {isTranslating ? 'Generando...' : translateDone ? '✓ Notas generadas' : 'Adaptar para cliente'}
+                {isTranslating ? (
+                  <ConstructionLoader variant="crane" size="sm" label="Generando…" />
+                ) : translateDone ? (
+                  '✓ Notas generadas'
+                ) : (
+                  'Adaptar para cliente'
+                )}
               </button>
               {translateError && (
                 <p className="text-xs text-red-500 font-medium text-right max-w-[260px]">{translateError}</p>
@@ -834,9 +842,13 @@ export default function EstimateEditor({
             <button 
               onClick={handleSave} 
               disabled={isSaving}
-              className="w-full md:w-auto flex items-center justify-center gap-2 bg-zinc-900 hover:bg-black active:bg-zinc-800 text-white px-8 py-3 rounded-xl font-bold transition shadow-md disabled:opacity-50"
+              className="w-full md:w-auto flex items-center justify-center gap-2 bg-zinc-900 hover:bg-black active:bg-zinc-800 text-white px-8 py-3 rounded-xl font-bold transition shadow-md disabled:bg-zinc-700 disabled:cursor-progress"
             >
-             {isSaving ? 'Guardando...' : 'Guardar Presupuesto'}
+             {isSaving ? (
+               <ConstructionLoader variant="crane" size="sm" tone="invert" label="Guardando…" />
+             ) : (
+               'Guardar Presupuesto'
+             )}
             </button>
             {saveError ? (
               <p className="text-[11px] text-red-500 font-bold text-center md:text-left">{saveError}</p>

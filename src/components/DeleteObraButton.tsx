@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { deleteEstimate } from '@/app/actions';
+import ConstructionLoader from '@/components/ConstructionLoader';
 import { Trash2 } from 'lucide-react';
 
 /**
@@ -35,9 +36,13 @@ export default function DeleteObraButton({ estimateId, address }: { estimateId: 
         onClick={handleDelete}
         disabled={deleting}
         title="Eliminar esta obra vacía"
-        className="flex items-center gap-1.5 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1.5 rounded-lg font-bold text-xs transition disabled:opacity-50 whitespace-nowrap"
+        className="flex items-center gap-1.5 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1.5 rounded-lg font-bold text-xs transition disabled:opacity-60 disabled:cursor-progress whitespace-nowrap"
       >
-        <Trash2 size={14} /> {deleting ? 'Eliminando...' : 'Eliminar'}
+        {deleting ? (
+          <ConstructionLoader variant="wall" size="sm" label="Eliminando…" />
+        ) : (
+          <><Trash2 size={14} /> Eliminar</>
+        )}
       </button>
       {error && <span className="text-[10px] font-bold text-red-500 text-right max-w-[180px]">{error}</span>}
     </div>

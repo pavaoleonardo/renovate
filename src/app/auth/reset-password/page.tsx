@@ -1,6 +1,7 @@
 import { updatePassword } from '@/app/login/actions'
 import Link from 'next/link'
 import PasswordInput from '@/components/PasswordInput'
+import SubmitButton from '@/components/SubmitButton'
 
 export default function ResetPasswordPage({
   searchParams,
@@ -23,12 +24,13 @@ export default function ResetPasswordPage({
         <PasswordInput name="password" minLength={8} required />
         <p className="text-zinc-400 text-xs mb-4">Mínimo 8 caracteres.</p>
 
-        <button
+        <SubmitButton
           formAction={updatePassword}
-          className="bg-blue-600 active:scale-[0.98] hover:bg-blue-700 text-white font-bold px-4 py-3 rounded-xl shadow-md transition mb-2"
+          pendingLabel="Guardando la contraseña…"
+          className="bg-blue-600 active:scale-[0.98] hover:bg-blue-700 text-white font-bold px-4 py-3 rounded-xl shadow-md transition mb-2 disabled:bg-blue-400"
         >
           Guardar nueva contraseña
-        </button>
+        </SubmitButton>
 
         {searchParams?.message && (
           <p className="mt-4 p-4 bg-red-50 text-red-600 font-medium text-center rounded-lg text-sm border border-red-100">

@@ -1,6 +1,7 @@
 import { signup } from '../actions'
 import Link from 'next/link'
 import PasswordInput from '@/components/PasswordInput'
+import SubmitButton from '@/components/SubmitButton'
 
 const inputClass =
   'rounded-lg px-4 py-3 bg-zinc-50 border border-zinc-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition font-medium'
@@ -75,12 +76,14 @@ export default function SignupPage({
           </label>
           <PasswordInput name="confirmPassword" id="confirmPassword" minLength={8} required />
 
-          <button
+          <SubmitButton
             formAction={signup}
-            className="bg-blue-600 active:scale-[0.98] hover:bg-blue-700 text-white font-bold px-4 py-3 rounded-xl shadow-md transition mt-4"
+            pendingLabel="Creando la cuenta…"
+            pendingHint="Preparando tu empresa y tu catálogo"
+            className="bg-blue-600 active:scale-[0.98] hover:bg-blue-700 text-white font-bold px-4 py-3 rounded-xl shadow-md transition mt-4 disabled:bg-blue-400"
           >
             Crear Cuenta
-          </button>
+          </SubmitButton>
 
           <Link
             href="/login"
