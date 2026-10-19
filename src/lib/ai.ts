@@ -37,6 +37,14 @@ export const IMPORT_AI_ENDPOINT = 'catalog-import-assist'
  */
 export const VOICE_AI_ENDPOINT = 'voice-change'
 
+/**
+ * Contador propio de «no encuentro los precios de este Excel». Va aparte del de
+ * importación porque sólo se gasta cuando la lectura determinista no ha encontrado ni
+ * un precio; con el mismo cupo, un documento roto dejaría al usuario sin asistencia
+ * para las líneas dudosas.
+ */
+export const LAYOUT_AI_ENDPOINT = 'catalog-import-layout'
+
 /** El modelo que usan todas las funciones de IA. */
 const AI_MODEL = 'gpt-4o-mini'
 

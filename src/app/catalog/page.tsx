@@ -268,6 +268,9 @@ export default function CatalogPage() {
 
       const next = res.preview ?? null
       setPreview(next)
+      // La columna que ha propuesto la IA para los precios se queda elegida: así el
+      // «confirmar» la manda tal cual (y no vuelve a preguntar) y el usuario la ve.
+      if (next?.priceColumn.aiChosen) setPriceCol(next.priceColumn.index)
       if (options.autoAi && next) {
         applySuggestions(
           next.ai?.suggestions ?? [],
@@ -801,11 +804,18 @@ export default function CatalogPage() {
                   <span className="text-blue-700">{preview.priceColumn.letter}</span>
                   {preview.priceColumn.header
                     ? ` («${preview.priceColumn.header}»)`
-                    : ' (la columna con más números, sin cabecera)'}
+                    : preview.priceColumn.aiChosen
+                      ? ' (elegida por la IA)'
+                      : ' (la columna con más números, sin cabecera)'}
                 </p>
                 <p className="text-xs font-bold text-zinc-500">
                   {preview.headerRow ? `Cabecera en la fila ${preview.headerRow} · ` : ''}
                   {preview.totals.services} partidas en {preview.totals.phases} secciones ·{' '}
+                  <span className={preview.totals.pricedServices === 0 ? 'text-amber-600' : 'text-zinc-600'}>
+                    {preview.totals.pricedServices} con precio
+                    {preview.totals.missingPrices > 0 ? ` · ${preview.totals.missingPrices} sin precio` : ''}
+                  </span>
+                  {' · '}
                   {preview.sectionColumn
                     ? `secciones por la columna ${preview.sectionColumn.letter}` +
                       (preview.sectionColumn.header ? ` («${preview.sectionColumn.header}»)` : '')
@@ -820,6 +830,20 @@ export default function CatalogPage() {
                     : ''}
                 </p>
               </div>
+
+              {!noPrices && preview.totals.pricedServices === 0 && (
+                <div className="p-3 bg-red-50 border-b border-red-100">
+                  <p className="text-sm font-black text-red-800">No he sabido leer los precios de este Excel</p>
+                  <p className="text-xs text-red-700 font-medium mt-1">
+                    {preview.priceColumn.aiChosen
+                      ? `Ni la IA: en la columna ${preview.priceColumn.letter} tampoco hay importes. `
+                      : 'La columna que he leído no trae importes. '}
+                    Elige abajo la columna del precio (verás tres valores de ejemplo de cada una) o marca «Importar sin
+                    precio» y pon tú las tarifas. Sin una de las dos cosas no se importará nada, para no dejar el catálogo
+                    lleno de partidas a 0,00 €.
+                  </p>
+                </div>
+              )}
 
               <div className="p-3 bg-zinc-50 border-b border-zinc-100 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
                 <div>
@@ -842,9 +866,11 @@ export default function CatalogPage() {
                       {preview.priceColumn.header ? ` («${preview.priceColumn.header}»)` : ''}
                       {preview.priceColumn.detectedByHeader
                         ? ' — por la cabecera'
-                        : preview.priceColumn.chosenByUser
-                          ? ' — elegida por ti'
-                          : ' — la de más números'}
+                        : preview.priceColumn.aiChosen
+                          ? ' — la eligió la IA'
+                          : preview.priceColumn.chosenByUser
+                            ? ' — elegida por ti'
+                            : ' — la de más números'}
                     </option>
                     {preview.columns.map((column) => (
                       <option key={column.index} value={column.index}>

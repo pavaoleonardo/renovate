@@ -131,3 +131,72 @@ describe('normalizeUnit', () => {
     expect(normalizeUnit('CJ')).toBe('CJ')
   })
 })
+
+/**
+ * The shape of the budget that broke the importer (2026-10, «PRESUPUESTO REFORMA
+ * JJ91»): no header row, a letterhead with three numbers in column F, then 120
+ * partidas whose quantity / unit price / line total live in G / H / I.
+ *
+ * Nothing of the real file is copied here — not one description, not one price, and
+ * of course no client data. Only the geometry, which is what `detectLayout` reads.
+ */
+const budgetWithLetterhead = (() => {
+  const rows: unknown[][] = [
+    [null, null, null, null, null, 'B 86213790'],
+    [null, null, null, null, null, 'C/ PINTO 39,3B'],
+    [null, null, null, null, null, '28982 PARLA'],
+    [null, 'Cliente :', 'Cliente de prueba', null, null, null],
+    [null, 'Obra :', 'Calle de prueba 91', null, null, null],
+    [null, 'Madrid 8 de mayo de 2026', null, null, null, null],
+    [null, null, null, null, 'Presupuesto 08052026.', null],
+    [null, null, null, null, null, null],
+    [null, 'Capitulo 1 Demoliciones', null, null, null, null, null, null, null]
+  ]
+  // 120 partidas, three sections: always qty × price = line total.
+  for (let i = 0; i < 120; i++) {
+    if (i % 40 === 0) rows.push([null, `Capitulo ${i / 40 + 2} Reformas`, null, null, null, null, null, null, null])
+    const quantity = (i % 12) + 1
+    const price = 6 + (i % 47) * 1.35
+    rows.push(['m2', `Partida sintética ${i + 1}`, null, null, null, null, String(quantity), price.toFixed(2).replace('.', ','), (quantity * price).toFixed(2).replace('.', ',')])
+  }
+  return rows
+})()
+
+describe('detectLayout · presupuesto sin cabeceras con membrete', () => {
+  it('lee el precio de H y la cantidad de G, no los tres números del membrete de F', () => {
+    const layout = detectLayout(budgetWithLetterhead)
+    // F tiene tres números (los del membrete): antes empataba a 1.000 con H e I y ganaba
+    // por ser la primera, así que las 120 partidas entraban sin precio.
+    expect(layout.priceCol).toBe(7)
+    expect(layout.quantityCol).toBe(6)
+    expect(layout.priceSource).toBe('numbers')
+    expect(layout.priceDetectedByHeader).toBe(false)
+  })
+
+  it('lo dice en el resumen: nombra la columna del membrete y la que se ha leído', () => {
+    const layout = detectLayout(budgetWithLetterhead)
+    const note = String(layout.priceNote)
+    expect(note).toMatch(/columna H/)
+    expect(note).toMatch(/columna F solo tiene 3 números/)
+    expect(note).toMatch(/cabecera del documento/)
+  })
+
+  it('ninguna partida se queda a 0 €: toda fila con cantidad trae su precio', () => {
+    const layout = detectLayout(budgetWithLetterhead)
+    const partidas = budgetWithLetterhead.filter((row) => String((row as unknown[])[1] ?? '').startsWith('Partida sintética'))
+    expect(partidas).toHaveLength(120)
+    for (const row of partidas) {
+      const price = (row as unknown[])[layout.priceCol]
+      expect(price).not.toBeNull()
+      expect(Number(String(price).replace('.', '').replace(',', '.'))).toBeGreaterThan(0)
+    }
+  })
+
+  it('un presupuesto con cabecera no cambia: su «Importe» nunca sustituye al «Precio»', () => {
+    const layout = detectLayout(normalBudget)
+    expect(layout.priceCol).toBe(4)
+    expect(layout.quantityCol).toBe(3)
+    expect(layout.priceSource).toBe('header')
+  })
+})
+

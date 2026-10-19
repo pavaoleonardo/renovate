@@ -26,7 +26,8 @@ import {
   type ServiceMatch
 } from '@/lib/catalog-import'
 import { bandSuggestedPrice, findMarketMatch, matchPhaseName, nameSimilarity } from '@/lib/catalog-match'
-import { AI_RATE_LIMIT_MESSAGE, IMPORT_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai'
+import { AI_RATE_LIMIT_MESSAGE, IMPORT_AI_ENDPOINT, LAYOUT_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai'
+import { layoutDigest, layoutPrompt, validateLayoutAnswer, type LayoutVerdict } from '@/lib/import-layout-ai'
 import { parsePriceInput } from '@/lib/price-input'
 import { matchCatalogCase } from '@/lib/catalog-case'
 import { createClient } from '@/lib/supabase/server'
@@ -53,6 +54,13 @@ interface ParsedService {
   unit: string
   base_price: number
   hasPrice: boolean
+  /**
+   * Quantity of the line in the document (`12,00 m2`). The catalogue does not store
+   * it: it is what proves the price column is the unit price and not the line total
+   * (`quantity × base_price = total`), and it is shown in the preview so the user can
+   * see the reading is right.
+   */
+  quantity: number | null
   /** Code column of the sheet («DEM-001»), when the document has one. */
   code: string | null
 }
@@ -67,6 +75,8 @@ interface ParsedSheet {
   phases: ParsedPhase[]
   layout: DetectedLayout
   missingPrices: number
+  /** Lines read with a real price (> 0). `0` means nothing was priced. */
+  pricedServices: number
   suspiciousPrices: number
   suspiciousExamples: string[]
   emptySectionNames: string[]
@@ -77,8 +87,11 @@ interface ParsedSheet {
 interface ParsedDocument {
   phases: ParsedPhase[]
   layout: DetectedLayout
+  /** Rows of the sheet `layout` was detected on: the AI validator needs them. */
+  rows: unknown[][]
   usedSheets: { name: string; phases: number; services: number }[]
   missingPrices: number
+  pricedServices: number
   suspiciousPrices: number
   warnings: string[]
 }
@@ -187,6 +200,9 @@ function parseCatalogSheet(rows: unknown[][], override: LayoutOverride = {}): Pa
     const unitCell = cellText(row[layout.unitCol])
     const nameCell = cellText(row[layout.nameCol])
     const price = parsePriceInput(row[layout.priceCol])
+    // Only read for the preview and for the `qty × price = total` check: the catalogue
+    // keeps tariff + unit, not the measurement of this particular job.
+    const quantity = layout.quantityCol === null ? null : parsePriceInput(row[layout.quantityCol])
 
     if (!nameCell && !unitCell) continue
     if (nameCell.toLowerCase().includes('total') || unitCell.toLowerCase().includes('total')) continue
@@ -261,6 +277,7 @@ function parseCatalogSheet(rows: unknown[][], override: LayoutOverride = {}): Pa
       unit: normalizeUnit(unitCell),
       base_price: hasPrice && price !== null ? price : 0,
       hasPrice,
+      quantity,
       code: layout.codeCol === null ? null : cellText(row[layout.codeCol]) || null
     })
   }
@@ -309,9 +326,15 @@ function parseCatalogSheet(rows: unknown[][], override: LayoutOverride = {}): Pa
       `Has pedido importar sin precios: las ${pricedServices + missingPrices} partidas se guardarán con 0,00 € para que pongas tus tarifas en el catálogo.`
     )
   } else if (pricedServices === 0) {
-    warnings.push(
+    const chosen =
       layout.priceSource === 'user'
-        ? `La columna ${columnLetter(layout.priceCol)} que has elegido no tiene números: las ${missingPrices} partidas se guardarán sin precio. Elige otra columna o marca «importar sin precio».`
+        ? `La columna ${columnLetter(layout.priceCol)} que has elegido no tiene números`
+        : layout.priceSource === 'ai'
+          ? `La columna ${columnLetter(layout.priceCol)} que ha elegido la IA tampoco tiene números`
+          : null
+    warnings.push(
+      chosen !== null
+        ? `${chosen}: las ${missingPrices} partidas se guardarán sin precio. Elige otra columna o marca «importar sin precio».`
         : `El documento no trae precios (la columna ${priceColumnLabel} está vacía o a 0 en todas las líneas): las ${missingPrices} partidas se importarán sin precio, para que pongas tus tarifas en el catálogo.`
     )
   } else if (missingPrices > 0) {
@@ -366,6 +389,7 @@ function parseCatalogSheet(rows: unknown[][], override: LayoutOverride = {}): Pa
     phases: usedPhases,
     layout,
     missingPrices,
+    pricedServices,
     suspiciousPrices,
     suspiciousExamples,
     emptySectionNames,
@@ -384,7 +408,9 @@ function parseDocument(sheets: DocumentSheet[], override: LayoutOverride = {}): 
   const warnings: string[] = []
   const failures: { sheet: string; message: string }[] = []
   let layout: DetectedLayout | null = null
+  let layoutRows: unknown[][] = []
   let missingPrices = 0
+  let pricedServices = 0
   let suspiciousPrices = 0
 
   for (const sheet of sheets) {
@@ -399,8 +425,12 @@ function parseDocument(sheets: DocumentSheet[], override: LayoutOverride = {}): 
     const services = parsed.phases.reduce((total, phase) => total + phase.services.length, 0)
     usedSheets.push({ name: sheet.name, phases: parsed.phases.length, services })
     missingPrices += parsed.missingPrices
+    pricedServices += parsed.pricedServices
     suspiciousPrices += parsed.suspiciousPrices
-    if (!layout) layout = parsed.layout
+    if (!layout) {
+      layout = parsed.layout
+      layoutRows = sheet.rows
+    }
 
     for (const warning of parsed.warnings) {
       // With a single sheet a warning is about the document; with several it has to
@@ -427,10 +457,42 @@ function parseDocument(sheets: DocumentSheet[], override: LayoutOverride = {}): 
   return {
     phases: Array.from(mergedPhases.values()),
     layout,
+    rows: layoutRows,
     usedSheets,
     missingPrices,
+    pricedServices,
     suspiciousPrices,
     warnings
+  }
+}
+
+/**
+ * La última red: cuando la lectura determinista no ha encontrado ni un precio, se le
+ * pregunta a la IA en qué columna están. Se gasta una llamada, sólo en ese caso, y su
+ * respuesta pasa por `validateLayoutAnswer` (determinista) antes de usarse: una
+ * respuesta que la hoja no puede demostrar vale menos que no tener respuesta.
+ *
+ * Devuelve `null` si falta la clave, si el cupo está agotado, si la llamada falla o si
+ * la propuesta no se sostiene. Nunca lanza: una importación no se cae porque falle la IA.
+ */
+async function askLayoutHelp(parsed: ParsedDocument): Promise<LayoutVerdict | null> {
+  if (!process.env.OPENAI_API_KEY) return null
+  const companyId = await getCompanyId()
+  if (!companyId) return null
+
+  const supabase = createClient()
+  if (await aiRateLimitReached(supabase, companyId, LAYOUT_AI_ENDPOINT)) return null
+  await recordAiCall(supabase, companyId, LAYOUT_AI_ENDPOINT)
+
+  try {
+    // Temperatura 0: dos hojas iguales tienen que dar la misma columna.
+    const answer = await askOpenAiJson<unknown>(layoutPrompt(layoutDigest(parsed.layout)), 0)
+    return validateLayoutAnswer(answer, parsed.layout, parsed.rows)
+  } catch {
+    // Sin detalle en el log: la respuesta de OpenAI no aporta nada aquí y puede traer
+    // fragmentos del digest.
+    console.error('La IA no pudo leer las columnas del documento.')
+    return null
   }
 }
 
@@ -621,13 +683,26 @@ export async function processExcelUpload(formData: FormData) {
       )
     }
 
+    // A document whose prices were not read is not an import: it is every partida at
+    // 0,00 €, which the budget export then refuses and which the «market band» fill
+    // would silently turn into invented rates. Refused before `clearCatalog` and before
+    // anything is written; the user has the column chooser in the preview, one click.
+    if (!parsed.layout.ignorePrices && parsed.pricedServices === 0) {
+      throw new Error(
+        `No se ha leído ni un precio en la columna ${columnLetter(parsed.layout.priceCol)}, así que no se ha tocado tu catálogo. ` +
+          'Elige la columna del precio en la vista previa y vuelve a confirmar; si el documento viene sin tarifas, marca «importar sin precio».'
+      )
+    }
+
     // Añadir es el modo por defecto: subir un documento nunca debe borrar el catálogo
     // que la empresa se ha construido. Reemplazarlo entero es una decisión explícita.
     const mode = formData.get('mode') === 'replace' ? 'replace' : 'merge'
     // «Rellenar los precios que falten con la estimación de la banda de mercado»:
     // activado salvo que el usuario lo desmarque — y nunca cuando ha pedido importar sin
-    // precios, que significa exactamente «no me pongas precios, ya los pongo yo».
-    const fillMissingPrices = formData.get('fillMissing') !== '0' && !parsed.layout.ignorePrices
+    // precios, que significa exactamente «no me pongas precios, ya los pongo yo», ni
+    // cuando no se ha leído ninguno (no hay nada que comparar con una banda).
+    const fillMissingPrices =
+      formData.get('fillMissing') !== '0' && !parsed.layout.ignorePrices && parsed.pricedServices > 0
     // Respuestas del panel de revisión (fusionar / crear) para las líneas dudosas.
     const decisions = decisionsFrom(formData)
 
@@ -693,7 +768,32 @@ export async function processExcelUpload(formData: FormData) {
 export async function previewExcelUpload(formData: FormData) {
   try {
     const document = await readDocument(formData)
-    const parsed = parseDocument(document.sheets, layoutOverrideFrom(formData))
+    const override = layoutOverrideFrom(formData)
+    let parsed = parseDocument(document.sheets, override)
+
+    /**
+     * Última red, y sólo cuando hace falta: la hoja no trae cabecera, no se ha leído ni
+     * un precio y el usuario no ha elegido columna. Se pregunta una vez por documento
+     * (`autoAi` sólo llega en el primer análisis), nunca en los reanálisis.
+     */
+    if (
+      formData.get('autoAi') === '1' &&
+      !parsed.layout.ignorePrices &&
+      parsed.pricedServices === 0 &&
+      override.priceCol === undefined
+    ) {
+      const verdict = await askLayoutHelp(parsed)
+      if (verdict) {
+        parsed = parseDocument(document.sheets, {
+          ...override,
+          priceCol: verdict.priceCol,
+          quantityCol: verdict.quantityCol,
+          byAi: true
+        })
+        // La nota de la IA va delante: es la respuesta a «¿de dónde salen estos precios?».
+        parsed.warnings.unshift(verdict.note)
+      }
+    }
 
     // What each line becomes has to be decided against the company's own catalogue,
     // so the preview loads it too: that is what turns «N partidas» into «this one you
@@ -729,14 +829,17 @@ export async function previewExcelUpload(formData: FormData) {
           name: service.name,
           unit: service.unit,
           base_price: service.base_price,
-          hasPrice: service.hasPrice
+          hasPrice: service.hasPrice,
+          quantity: service.quantity
         }))
       })),
       priceColumn: {
+        index: parsed.layout.priceCol,
         letter: columnLetter(parsed.layout.priceCol),
         header: parsed.layout.priceHeader,
         detectedByHeader: parsed.layout.priceDetectedByHeader,
-        chosenByUser: parsed.layout.priceSource === 'user'
+        chosenByUser: parsed.layout.priceSource === 'user',
+        aiChosen: parsed.layout.priceSource === 'ai'
       },
       sectionColumn:
         parsed.layout.sectionCol === null
@@ -746,6 +849,13 @@ export async function previewExcelUpload(formData: FormData) {
               header: parsed.layout.sectionHeader
             },
       nameColumn: { letter: columnLetter(parsed.layout.nameCol), header: parsed.layout.nameHeader },
+      quantityColumn:
+        parsed.layout.quantityCol === null
+          ? null
+          : {
+              letter: columnLetter(parsed.layout.quantityCol),
+              header: parsed.layout.columns[parsed.layout.quantityCol]?.header || ''
+            },
       unitColumn: {
         letter: parsed.layout.unitCol < 0 ? '' : columnLetter(parsed.layout.unitCol),
         header: parsed.layout.unitHeader
@@ -759,6 +869,7 @@ export async function previewExcelUpload(formData: FormData) {
         phases: parsed.phases.length,
         services,
         missingPrices: parsed.missingPrices,
+        pricedServices: parsed.pricedServices,
         suspiciousPrices: parsed.suspiciousPrices,
         existingMatches: plan.totals.existingMatches,
         similarMatches: plan.totals.similarMatches,

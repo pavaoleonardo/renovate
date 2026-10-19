@@ -198,6 +198,12 @@ export interface ExcelPreviewService {
   unit: string;
   base_price: number;
   hasPrice: boolean;
+  /**
+   * Quantity of the line in the document (`12,00 m2`), when the sheet has one. The
+   * catalogue does not store it; the preview shows it so the user can see that the
+   * price column read is the unit price and not the line total.
+   */
+  quantity: number | null;
 }
 
 export interface ExcelPreviewPhase {
@@ -277,7 +283,21 @@ export interface ExcelPreview {
   /** True when the user asked to import every line without a price. */
   ignorePrices: boolean;
   phases: ExcelPreviewPhase[];
-  priceColumn: { letter: string; header: string; detectedByHeader: boolean; chosenByUser: boolean };
+  priceColumn: {
+    /** Index of the column, so the page can carry the AI's answer into the confirm. */
+    index: number;
+    letter: string;
+    header: string;
+    detectedByHeader: boolean;
+    chosenByUser: boolean;
+    /** True when the column was proposed by the AI (the detector found no price). */
+    aiChosen: boolean;
+  };
+  /**
+   * Column the quantities of the lines were read from, when the sheet has one. It is
+   * what makes `quantity × price = total` checkable; the catalogue does not store it.
+   */
+  quantityColumn: { letter: string; header: string } | null;
   /**
    * Column the sections were read from, when the sheet has one. `null` means the
    * sections were guessed from the title rows of the sheet.
@@ -308,6 +328,8 @@ export interface ExcelPreview {
     phases: number;
     services: number;
     missingPrices: number;
+    /** Lines read with a real price (> 0). `0` blocks the import. */
+    pricedServices: number;
     suspiciousPrices: number;
     /** Lines that already exist (exact or auto) and will be merged. */
     existingMatches: number;

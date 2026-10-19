@@ -27,7 +27,7 @@ interface DetectedColumn {
 }
 
 /** How the price column was decided. */
-type PriceSource = 'header' | 'numbers' | 'user'
+type PriceSource = 'header' | 'numbers' | 'user' | 'ai'
 
 /**
  * What the user asked for in the preview: change the price column or import
@@ -35,6 +35,16 @@ type PriceSource = 'header' | 'numbers' | 'user'
  */
 export interface LayoutOverride {
   priceCol?: number | null
+  /**
+   * Column with the quantity, when it had to be given by hand or by the AI. The
+   * catalogue ignores it; it is what lets a budget line be read as `qty × price`.
+   */
+  quantityCol?: number | null
+  /**
+   * Set when `priceCol` came from the AI, so the preview can say «elegida por la IA»
+   * instead of attributing the choice to the user.
+   */
+  byAi?: boolean
   ignorePrices?: boolean
 }
 
@@ -43,6 +53,12 @@ export interface DetectedLayout {
   nameCol: number
   unitCol: number
   priceCol: number
+  /**
+   * Column with the quantity of the line (`12,00 m2`), when the sheet has one. It is
+   * how `qty × price` can be checked against the line total; the catalogue does not
+   * store it yet.
+   */
+  quantityCol: number | null
   /** Column with the partida's own code, when the sheet has one. */
   codeCol: number | null
   priceHeader: string
@@ -52,6 +68,11 @@ export interface DetectedLayout {
   priceNote: string | null
   ignorePrices: boolean
   headerRowIndex: number | null
+  /**
+   * First row of the table itself: everything above it (letterhead, address, date)
+   * is never scored as a price. `0` when the sheet has no recognisable data block.
+   */
+  firstDataRow: number
   /**
    * Column that groups partidas into sections ("Fase", "Capítulo", "Sección"…).
    * `null` means the sheet has no such column and sections are guessed from the
@@ -127,11 +148,11 @@ export function detectLayout(rows: unknown[][], override: LayoutOverride = {}): 
    * better than the header alone, and it is what lets the importer tell the user
    * «this column looks like measurements» instead of reading a 1,00 € inodoro.
    */
-  const columnStats = (col: number) => {
+  const columnStats = (col: number, fromRow = 0) => {
     let filled = 0
     let numeric = 0
     let overFive = 0
-    for (let i = 0; i < rows.length; i++) {
+    for (let i = fromRow; i < rows.length; i++) {
       // The header row is not data: its words («Precio», «Cantidad») would dilute how
       // dense the column is, which is exactly the signal that tells price from quantity.
       if (i === headerRowIndex) continue
@@ -145,7 +166,7 @@ export function detectLayout(rows: unknown[][], override: LayoutOverride = {}): 
     }
     const density = filled === 0 ? 0 : numeric / filled
     const priceShare = numeric === 0 ? 0 : overFive / numeric
-    return { filled, density, priceShare }
+    return { filled, numeric, density, priceShare }
   }
 
   /**
@@ -154,13 +175,13 @@ export function detectLayout(rows: unknown[][], override: LayoutOverride = {}): 
    * rather than like measurements.
    */
   const priceScore = (col: number) => {
-    const stats = columnStats(col)
+    const stats = columnStats(col, firstDataRow)
     if (stats.filled === 0 || stats.density === 0) return 0
     return stats.density * (0.55 + 0.45 * stats.priceShare)
   }
 
   const looksLikeQuantities = (col: number) => {
-    const stats = columnStats(col)
+    const stats = columnStats(col, firstDataRow)
     return stats.filled > 2 && stats.density >= 0.8 && stats.priceShare <= 0.2
   }
 
@@ -182,6 +203,10 @@ export function detectLayout(rows: unknown[][], override: LayoutOverride = {}): 
       HEADER_PATTERNS.quantity.test(cell)
     ))
     if (headerHits.length < 2) continue
+    // A header row is made of words. A partida such as «Partida 12 · m2 · 18,82» hits
+    // «partida» and «m2» too, so without this guard the first data row of a sheet
+    // without headers was taken as the header and its own numbers decided the columns.
+    if ((rows[i] || []).filter((cell) => parsePriceInput(cell) !== null).length >= 2) continue
 
     headerRowIndex = i
     cells.forEach((cell, col) => {
@@ -215,6 +240,106 @@ export function detectLayout(rows: unknown[][], override: LayoutOverride = {}): 
   // «Precio» that really carries the measurements of the job.
   const excluded = (col: number) => col === nameCol || col === unitCol || col === sectionCol || col === codeCol
 
+  // ── Where the table really starts ────────────────────────────────────────────
+  // A budget usually opens with a letterhead: client, address, phone, date. Those
+  // cells parse as numbers too (a phone and an address end in digits), and three of
+  // them in one column used to tie with the real price column and win the tie just by
+  // being first: every price came out empty and the import filled the catalogue with
+  // invented rates. Only a column that is numeric all the way down marks the table,
+  // so three numbers above it can never compete with 112 real ones.
+  const denseColumns: number[] = []
+  for (let col = 0; col < width; col++) if (columnStats(col).numeric >= 5) denseColumns.push(col)
+
+  const firstNumericRow = (col: number) => {
+    for (let i = 0; i < rows.length; i++) {
+      if (i === headerRowIndex) continue
+      if (parsePriceInput((rows[i] || [])[col]) !== null) return i
+    }
+    return rows.length
+  }
+
+  const firstDataRow = denseColumns.length === 0 ? 0 : Math.min(...denseColumns.map(firstNumericRow))
+  const dataRowCount = Math.max(rows.length - firstDataRow, 1)
+  // Short sheets (the fixtures, a five-line budget) need half their rows; a real
+  // budget needs five numbers and 15 % of the table. Without a floor, a column with
+  // three numbers in the letterhead is as «priced» as the column with every rate.
+  const minNumbers = dataRowCount < 10 ? Math.max(1, Math.ceil(dataRowCount / 2)) : 5
+
+  const isPriceShaped = (col: number) => {
+    const stats = columnStats(col, firstDataRow)
+    return stats.numeric >= minNumbers && stats.numeric / dataRowCount >= 0.15
+  }
+
+  /**
+   * Finds the three columns every priced budget has — quantity, unit price and
+   * `quantity × unit price` — by arithmetic instead of by position or by a header we
+   * may not have. This is what settles «H or I?» when both are full of numbers: the
+   * total is the one that equals the product, so the price is its factor. It also
+   * hands us the quantity column for free.
+   */
+  const totalsTriple = (): { totalCol: number; priceCol: number; quantityCol: number } | null => {
+    const candidates: number[] = []
+    for (let col = 0; col < width; col++) {
+      if (excluded(col) || isQuantityHeader(col)) continue
+      if (columnStats(col, firstDataRow).density < 0.6) continue
+      candidates.push(col)
+    }
+    // Price-shaped columns go first so a wide sheet never pushes the total out of the
+    // window; ten columns are more than any real budget has.
+    const ranked = candidates
+      .sort((a, b) => Number(isPriceShaped(b)) - Number(isPriceShaped(a)) || a - b)
+      .slice(0, 10)
+    const scanEnd = Math.min(rows.length, firstDataRow + 400)
+    const values = new Map<number, (number | null)[]>()
+    for (const col of ranked) {
+      const column: (number | null)[] = []
+      for (let i = firstDataRow; i < scanEnd; i++) column.push(parsePriceInput((rows[i] || [])[col]))
+      values.set(col, column)
+    }
+    const median = (col: number) => {
+      const numbers = (values.get(col) || [])
+        .filter((value): value is number => value !== null)
+        .map((value) => Math.abs(value))
+      if (numbers.length === 0) return 0
+      numbers.sort((a, b) => a - b)
+      return numbers[Math.floor(numbers.length / 2)]
+    }
+
+    for (let a = 0; a < ranked.length; a++) {
+      for (let b = a + 1; b < ranked.length; b++) {
+        const colA = ranked[a]
+        const colB = ranked[b]
+        for (const product of ranked) {
+          if (product === colA || product === colB) continue
+          const left = values.get(colA) || []
+          const right = values.get(colB) || []
+          const total = values.get(product) || []
+          let tested = 0
+          let hits = 0
+          for (let i = 0; i < total.length; i++) {
+            const va = left[i]
+            const vb = right[i]
+            const vp = total[i]
+            if (va === null || vb === null || vp === null || va === 0 || vb === 0) continue
+            tested++
+            const tolerance = Math.max(0.02, Math.abs(va * vb) * 0.01)
+            if (Math.abs(va * vb - vp) <= tolerance) hits++
+          }
+          // Four lines are the minimum that makes a coincidence unlikely; from then on
+          // the identity has to hold for seven out of ten lines.
+          if (tested >= 4 && hits / tested >= 0.7) {
+            const quantity = median(colA) <= median(colB) ? colA : colB
+            return { totalCol: product, priceCol: quantity === colA ? colB : colA, quantityCol: quantity }
+          }
+        }
+      }
+    }
+    return null
+  }
+
+  const triple = totalsTriple()
+  const totalsCol = triple ? triple.totalCol : -1
+
   let numericCol = -1
   let numericScore = 0
   for (let col = 0; col < width; col++) {
@@ -222,6 +347,14 @@ export function detectLayout(rows: unknown[][], override: LayoutOverride = {}): 
     // A column headed «Cantidad»/«Medición» is never the price, not even when it
     // is the only one with numbers: those numbers are the measurements.
     if (isQuantityHeader(col)) continue
+    // The line total is not a unit price either: importing it would store 226,50 €
+    // as the price of one square metre.
+    if (col === totalsCol) continue
+    // Of the detected triple, the price is the factor; the other one is the quantity.
+    if (triple && col === triple.quantityCol) continue
+    // A handful of numbers above the table (letterhead) or in a nearly empty column
+    // is not a price column, however dense it looks in those few cells.
+    if (col !== triple?.priceCol && !isPriceShaped(col)) continue
     const score = priceScore(col)
     if (score > numericScore) {
       numericCol = col
@@ -229,9 +362,24 @@ export function detectLayout(rows: unknown[][], override: LayoutOverride = {}): 
     }
   }
 
+  // Nothing price-shaped at all: keep the historical «most numeric» column so a very
+  // sparse sheet still opens (with the warning) instead of refusing the file.
+  if (numericCol === -1) {
+    for (let col = 0; col < width; col++) {
+      if (excluded(col) || isQuantityHeader(col) || col === totalsCol) continue
+      const score = priceScore(col)
+      if (score > numericScore) {
+        numericCol = col
+        numericScore = score
+      }
+    }
+  }
+
   let headerCol = -1
   let headerScore = 0
   for (const col of Array.from(priceCandidates)) {
+    // «Importe total» matches the price header and is not one: the total of the line.
+    if (col === totalsCol) continue
     const score = priceScore(col)
     if (score > headerScore) {
       headerCol = col
@@ -291,13 +439,46 @@ export function detectLayout(rows: unknown[][], override: LayoutOverride = {}): 
   // nothing was detected at all, which is exactly when they had to choose by hand.
   if (typeof override.priceCol === 'number' && override.priceCol >= 0 && override.priceCol < Math.max(width, 1)) {
     priceCol = override.priceCol
-    priceSource = 'user'
+    priceSource = override.byAi === true ? 'ai' : 'user'
     priceDetectedByHeader = false
     priceNote = null
   }
 
   if (priceCol === -1) {
     throw new Error('No se encontró ninguna columna con precios en el documento: elige la columna del precio a mano o añade una columna «Precio» y vuelve a intentarlo.')
+  }
+
+  // Never silent. With no header row the user cannot tell where the prices came from,
+  // so say it: which column, which one is the quantity, which one the line total, and
+  // which lookalike column was left out (the letterhead numbers that used to win).
+  if (priceSource === 'numbers' && headerRowIndex === null && priceNote === null) {
+    const parts = [
+      `No hay fila de cabeceras: los precios se leen de la columna ${label(priceCol)}, la que trae importes en todo el presupuesto.`
+    ]
+    if (triple) {
+      parts.push(
+        `La cantidad sale de la ${label(triple.quantityCol)} y el importe de cada línea de la ${label(triple.totalCol)} ` +
+          `(cantidad × precio cuadra en la mayoría de las filas).`
+      )
+    }
+    // Columns with a handful of numbers are the letterhead (phone, address, budget
+    // number). Naming them is what turns «why is everything 0 €?» into a readable rule;
+    // the one with most numbers goes first because it is the one that stole the price.
+    const decoys: { col: number; numeric: number }[] = []
+    for (let col = 0; col < width; col++) {
+      if (col === priceCol || col === totalsCol || col === triple?.quantityCol) continue
+      const stats = columnStats(col)
+      if (stats.numeric > 0 && stats.numeric < minNumbers) decoys.push({ col, numeric: stats.numeric })
+    }
+    decoys.sort((a, b) => b.numeric - a.numeric || a.col - b.col)
+    if (decoys.length > 0) {
+      const named = decoys.slice(0, 2).map(({ col, numeric }, index) => {
+        const label = `${index === 0 ? 'La' : 'la'} columna ${columnLetter(col)}`
+        return `${label} solo tiene ${numeric} ${numeric === 1 ? 'número' : 'números'}`
+      })
+      parts.push(`${named.join(' y ')}: parece la cabecera del documento, no una tarifa.`)
+    }
+    priceNote = parts.join(' ')
   }
 
   // Files without headers keep the historical layout: A = unit, B = description
@@ -328,10 +509,30 @@ export function detectLayout(rows: unknown[][], override: LayoutOverride = {}): 
     codeCol = -1
   }
 
+  // ── Quantity ────────────────────────────────────────────────────────────────
+  // A header that says «Cantidad» is authoritative; otherwise the arithmetic of the
+  // triple already told us which factor is the quantity. A quantity column can never
+  // be one of the columns we read as something else.
+  const headerQuantity = Array.from(quantityCols)[0]
+  let quantityCol =
+    headerQuantity !== undefined ? headerQuantity : triple ? triple.quantityCol : -1
+  if (typeof override.quantityCol === 'number' && override.quantityCol >= 0 && override.quantityCol < Math.max(width, 1)) {
+    quantityCol = override.quantityCol
+  }
+  if (
+    quantityCol === nameCol ||
+    quantityCol === unitCol ||
+    quantityCol === priceCol ||
+    quantityCol === sectionCol ||
+    quantityCol === codeCol ||
+    quantityCol < 0
+  ) {
+    quantityCol = -1
+  }
+
   // Every column is described for the chooser of the preview, so the user can see
   // what is inside each one («Precio»: 12,35 · 45,90 · 780,50) before confirming.
   const columns: DetectedColumn[] = []
-  const firstDataRow = (headerRowIndex ?? -1) + 1
   for (let col = 0; col < width; col++) {
     const samples: string[] = []
     let numbers = 0
@@ -347,6 +548,7 @@ export function detectLayout(rows: unknown[][], override: LayoutOverride = {}): 
     nameCol,
     unitCol,
     priceCol,
+    quantityCol: quantityCol === -1 ? null : quantityCol,
     codeCol: codeCol === -1 ? null : codeCol,
     priceHeader: headerCells[priceCol] || '',
     priceDetectedByHeader,
@@ -354,6 +556,7 @@ export function detectLayout(rows: unknown[][], override: LayoutOverride = {}): 
     priceNote,
     ignorePrices: override.ignorePrices === true,
     headerRowIndex,
+    firstDataRow,
     sectionCol: sectionCol === -1 ? null : sectionCol,
     sectionHeader: sectionCol === -1 ? '' : (headerCells[sectionCol] || ''),
     nameHeader: headerCells[nameCol] || '',
