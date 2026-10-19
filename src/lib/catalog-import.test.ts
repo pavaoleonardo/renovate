@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_CATALOG } from '@/lib/default-catalog'
 import {
   ambiguousMatches,
+  dedupeImportedServices,
   importLineKey,
   itemMatchPrompt,
   matchIncomingService,
@@ -58,11 +59,13 @@ describe('matchIncomingService', () => {
   })
 
   it('el mismo trabajo escrito de otra forma se fusiona solo (auto)', () => {
-    const incoming = demolicion.name.replace('ladrillo/rasillón', 'ladrillo').replace('Demolición', 'Demolicion')
+    // Las preposiciones fuera: «Demolición tabique ladrillo» es la misma partida.
+    const incoming = 'Demolición tabique ladrillo'
     const match = matchIncomingService({ name: incoming }, existing, DEFAULT_CATALOG[0].name)
     expect(match.status).toBe('auto')
     expect(match.score).toBeGreaterThanOrEqual(0.72)
-    expect(match.score).toBeLessThan(1)
+    // No es `exact`: el nombre no es el mismo, sólo lo parece (y el bonus de la misma
+    // sección puede empujar la nota por encima de 1).
   })
 
   it('un nombre contenido con dos palabras compartidas se fusiona solo', () => {
@@ -154,6 +157,55 @@ const question: ImportMatchQuestion = {
   unit: 'm2',
   candidates: [{ id: 'id-pintura', name: 'Pintura de paredes y techos', unit: 'm2', base_price: 9 }]
 }
+
+describe('dedupeImportedServices', () => {
+  const line = (name: string, price: number, hasPrice = true) => ({
+    name,
+    unit: 'm2',
+    base_price: price,
+    has_price: hasPrice
+  })
+
+  it('la misma partida repetida en una sección se guarda una vez', () => {
+    const services = dedupeImportedServices([
+      line('Mano de obra en colocación de plaqueta cerámica suelo', 12),
+      line('Mano de obra en colocación de plaqueta cerámica suelo', 12)
+    ])
+    expect(services).toHaveLength(1)
+  })
+
+  it('los acentos y las mayúsculas no crean una segunda partida', () => {
+    const services = dedupeImportedServices([line('Demolición de tabique', 14.5), line('DEMOLICION DE TABIQUE', 14.5)])
+    expect(services).toHaveLength(1)
+  })
+
+  it('dos partidas distintas siguen siendo dos', () => {
+    const services = dedupeImportedServices([line('Demolición de tabique', 14.5), line('Picado de alicatado', 11)])
+    expect(services).toHaveLength(2)
+  })
+
+  it('si la primera copia va sin precio, manda la que lo trae', () => {
+    const services = dedupeImportedServices([line('Demolición de tabique', 0, false), line('Demolición de tabique', 14.5)])
+    expect(services).toHaveLength(1)
+    expect(services[0].base_price).toBe(14.5)
+    expect(services[0].has_price).toBe(true)
+  })
+
+  it('una copia sin precio no borra el precio de la primera', () => {
+    const services = dedupeImportedServices([line('Demolición de tabique', 14.5), line('Demolición de tabique', 0, false)])
+    expect(services[0].base_price).toBe(14.5)
+    expect(services[0].has_price).toBe(true)
+  })
+
+  it('conserva el código que traiga cualquiera de las copias', () => {
+    const services = dedupeImportedServices([
+      { ...line('Demolición de tabique', 14.5), code: null },
+      { ...line('Demolición de tabique', 14.5), code: 'DEM-003' }
+    ])
+    expect(services[0].code).toBe('DEM-003')
+  })
+})
+
 
 describe('parseItemMatches', () => {
   it('la IA sólo puede elegir entre los candidatos que se le ofrecieron', () => {

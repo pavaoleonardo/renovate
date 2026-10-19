@@ -67,7 +67,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
     services: [
       {
         code: 'DEM-001',
-        name: 'Demolición de tabique de ladrillo/rasillón',
+        name: 'Demolición de tabique de ladrillo',
         description: 'Demolición de tabique de fábrica de ladrillo o rasillón por medios manuales, incluyendo transporte interno a punto de carga.',
         unit: 'm2',
         base_price: 14.5,
@@ -115,7 +115,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'DEM-004',
-        name: 'Carga y retirada de escombros a vertedero autorizado',
+        name: 'Retirada de escombros a vertedero',
         description: 'Carga manual o mecánica de escombros, canon de vertedero autorizado y tasa de gestión de residuos.',
         unit: 'm3',
         base_price: 38,
@@ -147,7 +147,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'DEM-006',
-        name: 'Desmontaje de carpintería interior y limpieza final de la zona de trabajo',
+        name: 'Desmontaje de carpintería interior',
         description: 'Desmontaje de carpintería interior (puertas y ventanas) con retirada de herrajes aprovechables, desmontaje de marcos y limpieza final de la zona de trabajo.',
         unit: 'ud',
         base_price: 45,
@@ -168,7 +168,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
     services: [
       {
         code: 'ALB-001',
-        name: 'Levantado de tabique de ladrillo hueco doble (7 cm)',
+        name: 'Tabique de ladrillo hueco doble 7 cm',
         description: 'Tabicón de ladrillo hueco doble tomado con mortero de cemento, listo para guarnecido.',
         unit: 'm2',
         base_price: 26,
@@ -184,7 +184,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'ALB-002',
-        name: 'Maestreado y enfoscado de mortero de cemento en paredes',
+        name: 'Enfoscado de mortero de cemento',
         description: 'Enfoscado maestreado con mortero de cemento sobre paramentos verticales para posterior alicatado.',
         unit: 'm2',
         base_price: 16.5,
@@ -200,7 +200,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'ALB-003',
-        name: 'Ejecución de solera autonivelante (3-5 cm)',
+        name: 'Solera autonivelante 3-5 cm',
         description: 'Formación de recrecido de suelo con mortero autonivelante para regularización de base de solado.',
         unit: 'm2',
         base_price: 18,
@@ -216,7 +216,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'ALB-004',
-        name: 'Ayudas de albañilería a instalaciones (fontanería/electricidad)',
+        name: 'Ayudas de albañilería a instalaciones',
         description: 'Apertura y tapado de rozas, rematado de cajas de mecanismos y pasos de tuberías en obra.',
         unit: 'vg',
         base_price: 350,
@@ -248,7 +248,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'ALB-006',
-        name: 'Apertura de hueco en muro de carga con cargadero/dintel (incluido apuntalamiento)',
+        name: 'Apertura de hueco en muro de carga',
         description: 'Apertura de hueco en muro de carga para paso o ventana (hasta 1,20 m), con apuntalamiento, cargadero metálico o dintel de hormigón y remate de jambas.',
         unit: 'ud',
         base_price: 480,
@@ -269,7 +269,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
     services: [
       {
         code: 'SOL-001',
-        name: 'Alicatado de paramento vertical con gres cerámico (colocación)',
+        name: 'Alicatado de pared con gres cerámico',
         description: 'Mano de obra y material de agarre (cemento cola C2TE) para colocación de azulejos (material cerámico no incluido).',
         unit: 'm2',
         base_price: 24,
@@ -285,7 +285,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'SOL-002',
-        name: 'Solado de gres porcelánico gran formato (colocación)',
+        name: 'Solado de gres porcelánico gran formato',
         description: 'Mano de obra y cemento cola flexible tipo C2TES1 para colocación de porcelánico hasta 120x60 cm con crucetas autonivelantes.',
         unit: 'm2',
         base_price: 29,
@@ -301,7 +301,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'SOL-003',
-        name: 'Rejuntado de azulejos/baldosas con junta deformable',
+        name: 'Rejuntado de azulejos y baldosas',
         description: 'Aplicación de pasta de rejuntar antihumedad en juntas de pared o suelo, limpiado y pulido final.',
         unit: 'm2',
         base_price: 4.5,
@@ -317,7 +317,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'SOL-004',
-        name: 'Colocación de rodapié cerámico o de madera',
+        name: 'Colocación de rodapié cerámico',
         description: 'Suministro de agarre/adhesivo y colocación de rodapié en perímetro de estancia.',
         unit: 'ml',
         base_price: 7.5,
@@ -333,7 +333,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'SOL-005',
-        name: 'Impermeabilización de plato de ducha en obra',
+        name: 'Impermeabilización de plato de ducha',
         description: 'Aplicación de lámina impermeable tipo Kermate u homóloga en zona de ducha con solape en paredes.',
         unit: 'ud',
         base_price: 110,
@@ -349,7 +349,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'SOL-006',
-        name: 'Regularización de paredes con mortero de reparación (hasta 2 cm) antes de alicatar',
+        name: 'Regularización de paredes para alicatar',
         description: 'Regularización de paramentos verticales con mortero de reparación (hasta 2 cm) para dejar el soporte plano y apto para alicatado.',
         unit: 'm2',
         base_price: 13,
@@ -370,7 +370,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
     services: [
       {
         code: 'FON-001',
-        name: 'Instalación completa de fontanería para baño (agua fría/caliente)',
+        name: 'Fontanería completa para baño',
         description: 'Instalación en tubería multicapa o PEX para lavabo, inodoro, bidet y ducha, con llaves de corte individuales.',
         unit: 'ud',
         base_price: 520,
@@ -386,7 +386,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'FON-002',
-        name: 'Instalación completa de fontanería para cocina',
+        name: 'Fontanería completa para cocina',
         description: 'Tomas de agua y desagües para fregadero, lavavajillas y lavadora con llaves de escuadra cromadas.',
         unit: 'ud',
         base_price: 420,
@@ -402,7 +402,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'FON-003',
-        name: 'Montaje e instalación de sanitario (inodoro/lavabo)',
+        name: 'Montaje de sanitario (inodoro/lavabo)',
         description: 'Fijación, conexión de desagüe y agua, y sellado con silicona neutra antimoho de inodoro o lavabo con pedestal/mueble.',
         unit: 'ud',
         base_price: 75,
@@ -418,7 +418,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'FON-004',
-        name: 'Montaje de plato de ducha de resina/carga mineral',
+        name: 'Montaje de plato de ducha de resina',
         description: 'Colocación, nivelado, conexión de válvula de gran caudal y sellado de plato de ducha.',
         unit: 'ud',
         base_price: 130,
@@ -434,7 +434,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'FON-005',
-        name: 'Montaje de mampara de ducha (frontal o angular)',
+        name: 'Montaje de mampara de ducha',
         description: 'Instalación y fijación a pared de mampara de vidrio templado, ajuste de rodamientos y sellado.',
         unit: 'ud',
         base_price: 95,
@@ -450,7 +450,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'FON-006',
-        name: 'Instalación o sustitución de radiador de aluminio',
+        name: 'Instalación de radiador de aluminio',
         description: 'Montaje de radiador por elementos, llaves termostáticas, detentor, purgador y conexionado a red de calefacción.',
         unit: 'ud',
         base_price: 140,
@@ -466,7 +466,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'FON-007',
-        name: 'Suministro e instalación de termo eléctrico ACS 100 l',
+        name: 'Termo eléctrico ACS 100 l instalado',
         description: 'Suministro y montaje de termo eléctrico de 100 l para ACS, con llaves de corte, conexiones flexibles, purga de aire y prueba de estanqueidad.',
         unit: 'ud',
         base_price: 380,
@@ -487,7 +487,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
     services: [
       {
         code: 'ELE-001',
-        name: 'Punto de luz sencillo / conmutado (cableado y tubo ondulado)',
+        name: 'Punto de luz sencillo o conmutado',
         description: 'Suministro e instalación de punto de luz con tubo corrugado libre de halógenos, cable de 1,5 mm2 y caja de registro.',
         unit: 'ud',
         base_price: 42,
@@ -503,7 +503,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'ELE-002',
-        name: 'Punto de toma de corriente (enchufe 16A con toma de tierra)',
+        name: 'Punto de enchufe 16A con toma de tierra',
         description: 'Instalación de línea de enchufe con conductor de 2,5 mm2, tubo corrugado y caja de empotrar.',
         unit: 'ud',
         base_price: 45,
@@ -519,7 +519,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'ELE-003',
-        name: 'Sustitución e instalación de Cuadro General de Mando y Protección (CGMP)',
+        name: 'Cuadro General de Mando y Protección',
         description: 'Cuadro de superficie o empotrar hasta 24 elementos con IGA, diferencial de alta sensibilidad y PIA por circuito.',
         unit: 'ud',
         base_price: 380,
@@ -535,7 +535,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'ELE-004',
-        name: 'Toma de red de datos (RJ45 Cat 6) o Coaxial TV',
+        name: 'Toma de datos RJ45 o coaxial TV',
         description: 'Instalación de toma para televisión o datos con cable apantallado Cat 6 hasta cuadro de comunicaciones.',
         unit: 'ud',
         base_price: 55,
@@ -551,7 +551,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'ELE-005',
-        name: 'Montaje de mecanismo eléctrico (marco + tecla/enchufe)',
+        name: 'Montaje de mecanismo eléctrico',
         description: 'Instalación y conexionado de mecanismo (tipo Simon 27/82, Niessen Zenit o similar).',
         unit: 'ud',
         base_price: 9,
@@ -567,7 +567,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'ELE-006',
-        name: 'Instalación de foco LED empotrable / downlight',
+        name: 'Foco LED empotrable / downlight',
         description: 'Apertura de hueco en falso techo de pladur y montaje de foco LED con driver.',
         unit: 'ud',
         base_price: 18,
@@ -583,7 +583,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'ELE-007',
-        name: 'Circuito completo desde CGMP (cableado, tubo y protecciones)',
+        name: 'Circuito completo desde el cuadro',
         description: 'Circuito completo desde el cuadro general: tubo corrugado libre de halógenos, cable de 2,5 mm2, cajas de derivación y protección magnetotérmica (PIA).',
         unit: 'ud',
         base_price: 135,
@@ -604,7 +604,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
     services: [
       {
         code: 'PLA-001',
-        name: 'Falso techo continuo de placa de cartón yeso (Pladur) 13 mm',
+        name: 'Falso techo de Pladur de 13 mm',
         description: 'Estructura metálica suspendida de perfiles TC60 y placa N13, incluyendo cintas y amasado de juntas.',
         unit: 'm2',
         base_price: 26.5,
@@ -620,7 +620,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'PLA-002',
-        name: 'Tabique de cartón yeso autoportante con aislamiento (15+46+15 mm)',
+        name: 'Tabique de Pladur autoportante',
         description: 'Doble placa a cada lado con perfilería de 46 mm e interior relleno de lana de roca aislante acústico.',
         unit: 'm2',
         base_price: 38,
@@ -636,7 +636,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'PLA-003',
-        name: 'Falso techo hidrófugo para baño/cocina (placa verde WR)',
+        name: 'Falso techo hidrófugo para baño',
         description: 'Falso techo continuo con placa resistente a la humedad tipo Pladur WR de 13 mm.',
         unit: 'm2',
         base_price: 29.5,
@@ -652,7 +652,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'PLA-004',
-        name: 'Formación de cortinero o foseado periférico para tiras LED',
+        name: 'Cortinero o foseado para tiras LED',
         description: 'Ejecución manual de remate en falso techo para alojamiento de cortinero o luz ambiental indirecta.',
         unit: 'ml',
         base_price: 22,
@@ -668,7 +668,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'PLA-005',
-        name: 'Trasdosado autoportante 13+46 con lana mineral (pared)',
+        name: 'Trasdosado de Pladur con lana mineral',
         description: 'Trasdosado autoportante de placa de 13 mm sobre perfil de 46 mm con lana mineral de 40 mm en su interior, incluido tratamiento de juntas.',
         unit: 'm2',
         base_price: 33,
@@ -684,7 +684,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'PLA-006',
-        name: 'Aislamiento acústico de tabique existente (lana mineral 40 mm + trasdosado simple)',
+        name: 'Aislamiento acústico de tabique',
         description: 'Aislamiento acústico de tabique existente con lana mineral de 40 mm y trasdosado simple de placa de 13 mm, con cintas y amasado de juntas.',
         unit: 'm2',
         base_price: 24,
@@ -705,7 +705,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
     services: [
       {
         code: 'PIN-001',
-        name: 'Alisado de gotelé en paredes y techos (2 manos de tendido)',
+        name: 'Alisado de gotelé en paredes y techos',
         description: 'Rascado o fijado de gota existente, tendido de 2 manos de masilla de renovación (tipo Aguaplast) y lijado fino.',
         unit: 'm2',
         base_price: 14.5,
@@ -721,7 +721,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'PIN-002',
-        name: 'Pintado con pintura plástica mate lavable (2 manos)',
+        name: 'Pintura plástica mate lavable',
         description: 'Aplicación de imprimación selladora y dos manos de pintura plástica de primera calidad en color blanco o suave.',
         unit: 'm2',
         base_price: 8.5,
@@ -737,7 +737,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'PIN-003',
-        name: 'Esmaltado al agua de puertas de paso / armarios',
+        name: 'Esmaltado al agua de puertas',
         description: 'Lijado, imprimación y aplicación de 2 manos de esmalte laca sintético al agua en color blanco sobre puertas existentes.',
         unit: 'ud',
         base_price: 85,
@@ -753,7 +753,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'PIN-004',
-        name: 'Tratamiento fijador antimoho y antihumedad en techos de baño',
+        name: 'Fijador antimoho en techos de baño',
         description: 'Limpieza química de manchas de moho, aplicación de fondo fijador e imprimación antimoho.',
         unit: 'm2',
         base_price: 12,
@@ -769,7 +769,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'PIN-005',
-        name: 'Pintura de fachada exterior impermeabilizante (imprimación + 2 manos)',
+        name: 'Pintura impermeabilizante de fachada',
         description: 'Preparación del soporte, imprimación y dos manos de pintura impermeabilizante elástica en fachada exterior, con protección de huecos y remates.',
         unit: 'm2',
         base_price: 14,
@@ -785,7 +785,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'PIN-006',
-        name: 'Esmaltado de radiadores (lijado, imprimación y 2 manos de esmalte)',
+        name: 'Esmaltado de radiadores',
         description: 'Desmontaje, lijado, imprimación antioxidante y dos manos de esmalte al agua sobre radiadores existentes.',
         unit: 'ud',
         base_price: 45,
@@ -806,7 +806,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
     services: [
       {
         code: 'CAR-001',
-        name: 'Suministro e instalación de puerta de paso MDF lacada en blanco',
+        name: 'Puerta de paso MDF lacada en blanco',
         description: 'Puerta de diseño moderno, tapajuntas de 7/9 cm, bisagras/pernios inox y manilla con condena en baño.',
         unit: 'ud',
         base_price: 240,
@@ -822,7 +822,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'CAR-002',
-        name: 'Instalación de suelo laminado flotante AC5 (mano de obra + aislante)',
+        name: 'Suelo laminado flotante AC5 instalado',
         description: 'Colocación de manta aislante de polietileno y montaje de tarima flotante sintética AC5 clase 33.',
         unit: 'm2',
         base_price: 13.5,
@@ -838,7 +838,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'CAR-003',
-        name: 'Frente de armario empotrado corredero o abatible lacado',
+        name: 'Frente de armario empotrado lacado',
         description: 'Fabricación e instalación de frente de armario lacado en blanco con perfiles de aluminio y tiradores embutidos.',
         unit: 'm2',
         base_price: 180,
@@ -854,7 +854,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'CAR-004',
-        name: 'Revestimiento interior de armario en melamina con baldas y cajonera',
+        name: 'Interior de armario en melamina',
         description: 'Forrado de interior de armario empotrado con melamina de 16 mm, módulo de cajones y barra de colgar.',
         unit: 'm2',
         base_price: 140,
@@ -870,7 +870,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'CAR-005',
-        name: 'Ventana de PVC con rotura de puente térmico y persiana (hasta 1,20×1,20 m)',
+        name: 'Ventana de PVC con rotura de puente',
         description: 'Suministro e instalación de ventana de PVC con rotura de puente térmico, doble acristalamiento y persiana de aluminio con lama rellena (hasta 1,20x1,20 m).',
         unit: 'ud',
         base_price: 480,
@@ -886,7 +886,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'CAR-006',
-        name: 'Puerta de entrada blindada clase 3 (3 puntos, mirilla y herrajes de seguridad)',
+        name: 'Puerta de entrada blindada clase 3',
         description: 'Suministro e instalación de puerta de entrada blindada clase 3, con tres puntos de cerradura, mirilla, bisagras de seguridad y tapajuntas.',
         unit: 'ud',
         base_price: 1250,
@@ -907,7 +907,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
     services: [
       {
         code: 'CLI-001',
-        name: 'Preinstalación de aire acondicionado por conductos en vivienda',
+        name: 'Preinstalación de aire por conductos',
         description: 'Tirada de líneas de cobre frigorífico aislado, mangueras eléctricas de interconexión y tubo de desagüe anticondensación hasta 10 m.',
         unit: 'ud',
         base_price: 450,
@@ -923,7 +923,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'CLI-002',
-        name: 'Instalación de equipo de aire acondicionado Split 1x1 (hasta 3 m)',
+        name: 'Split 1x1 instalado (hasta 3 m)',
         description: 'Montaje de unidad interior y exterior, soportes de pared con silentblocks, paso de muro, abocardado y prueba de estanqueidad.',
         unit: 'ud',
         base_price: 220,
@@ -939,7 +939,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'CLI-003',
-        name: 'Fabricación y montaje de red de conductos de fibra tipo Climaver',
+        name: 'Red de conductos de fibra tipo Climaver',
         description: 'Conductos de lana de vidrio de alta densidad para distribución de aire en falso techo con rejillas de impulsión y retorno.',
         unit: 'ml',
         base_price: 38,
@@ -955,7 +955,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'CLI-004',
-        name: 'Instalación de multisplit 2x1 (unidad exterior + 2 interiores, hasta 6 m)',
+        name: 'Multisplit 2x1 instalado (hasta 6 m)',
         description: 'Instalación de equipo multisplit 2x1 (una unidad exterior y dos interiores) con líneas frigoríficas hasta 6 m, soportes, desagües y prueba de estanqueidad.',
         unit: 'ud',
         base_price: 420,
@@ -971,7 +971,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'CLI-005',
-        name: 'Recarga de gas refrigerante y puesta en marcha (RITE)',
+        name: 'Recarga de gas y puesta en marcha',
         description: 'Recarga de gas refrigerante R32/R410A con detección de fugas, vacío y puesta en marcha del equipo conforme a RITE.',
         unit: 'ud',
         base_price: 120,
@@ -987,7 +987,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'CLI-006',
-        name: 'Suministro y montaje de máquina de conductos con distribución hasta 4 rejillas',
+        name: 'Máquina de conductos hasta 4 rejillas',
         description: 'Suministro y montaje de máquina de conductos con red de distribución de fibra hasta cuatro rejillas de impulsión y retorno, y puesta en marcha.',
         unit: 'ud',
         base_price: 1450,
@@ -1008,7 +1008,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
     services: [
       {
         code: 'TRM-001',
-        name: 'Boletín eléctrico (Certificado de Instalación Eléctrica, CIE) con tramitación',
+        name: 'Boletín eléctrico (CIE) con tramitación',
         description: 'Emisión y tramitación del Certificado de Instalación Eléctrica (boletín) ante el organismo de industria competente, incluida la tasa de registro.',
         unit: 'ud',
         base_price: 180,
@@ -1024,7 +1024,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'TRM-002',
-        name: 'Certificado de instalación térmica / boletín ITIAC con tramitación',
+        name: 'Certificado ITIAC con tramitación',
         description: 'Emisión y tramitación del certificado de instalación térmica / boletín ITIAC de fontanería y calefacción, incluida la tasa de registro.',
         unit: 'ud',
         base_price: 150,
@@ -1040,7 +1040,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'TRM-003',
-        name: 'Licencia de obra menor o declaración responsable + tasa municipal',
+        name: 'Licencia de obra menor y tasa municipal',
         description: 'Redacción y presentación de la licencia de obra menor o declaración responsable ante el ayuntamiento, incluida la tasa municipal (varía según municipio).',
         unit: 'ud',
         base_price: 220,
@@ -1056,7 +1056,7 @@ export const DEFAULT_CATALOG: DefaultCatalogPhase[] = [
       },
       {
         code: 'TRM-004',
-        name: 'Certificado de eficiencia energética (CEE) registrado',
+        name: 'Certificado energético (CEE) registrado',
         description: 'Emisión, registro y tramitación del certificado de eficiencia energética (CEE) de la vivienda.',
         unit: 'ud',
         base_price: 130,

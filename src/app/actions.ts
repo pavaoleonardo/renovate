@@ -8,6 +8,7 @@ import { CATALOG_PAGE_SIZE, CatalogPageWindow, catalogPageHasMore, catalogPageWi
 import {
   ExistingService,
   ImportedServiceInput,
+  dedupeImportedServices,
   importLineKey,
   matchIncomingService,
   parseSectionMatches,
@@ -16,6 +17,7 @@ import {
   unmatchedSections
 } from '@/lib/catalog-import';
 import { bandSuggestedPrice, findMarketMatch, matchPhaseName } from '@/lib/catalog-match';
+import { nextServiceCode, phaseCodePrefix } from '@/lib/catalog-codes';
 import { IMPORT_ESTIMATE_SOURCE, todayIsoDate } from '@/lib/price-basis';
 import { catalogErrorMessage } from '@/lib/catalog-errors';
 import { computeTotals, normalizeTaxRate } from '@/lib/estimate-totals';
@@ -1002,7 +1004,17 @@ export async function addPhaseAndServices(
     // La sección con la que se fusiona manda a la hora de medir el parecido de sus
     // partidas, y es la que se usa para la clave de la decisión del panel.
     const phaseName = matchedName ?? incomingName;
-    const services = phaseServicesMap[i] || [];
+    // Las líneas repetidas del documento (una celda partida en dos filas) se unen antes
+    // de escribir: el resumen previo ya las cuenta una vez y la escritura tiene que
+    // hacer lo mismo, o la partida acaba duplicada en la misma sección.
+    const services = dedupeImportedServices(phaseServicesMap[i] || []);
+    // Códigos de la sección: los que ya tiene (para no repetir número) y los que se van
+    // asignando en esta importación. El prefijo sale de su serie o, si aún no hay
+    // ninguna, de su nombre («Demoliciones» → DEM-001).
+    const phaseCodes: (string | null)[] = pool
+      .filter((service) => service.phase_id === phaseId)
+      .map((service) => service.code ?? null);
+    const codePrefix = phaseCodePrefix(phaseName, phaseCodes);
     const rows: Record<string, unknown>[] = [];
 
     for (const service of services) {
@@ -1012,6 +1024,8 @@ export async function addPhaseAndServices(
         continue;
       }
 
+      // El código del documento es el único que sirve para emparejar; el que se
+      // inventa la app se asigna al crear la fila.
       const code = service.code ?? null;
       const match = matchIncomingService({ name: service.name, code }, pool, phaseName);
       // La respuesta del panel se busca por la sección con la que se fusiona y, si no
@@ -1055,12 +1069,17 @@ export async function addPhaseAndServices(
           : null;
       if (estimate !== null) summary.servicesEstimated++;
 
+      // Toda partida nueva sale con código, aunque el documento no traiga la columna: el
+      // catálogo entero se puede citar («la DEM-007») y el Excel de vuelta lo conserva.
+      const assignedCode = code ?? nextServiceCode(codePrefix, phaseCodes);
+      phaseCodes.push(assignedCode);
+
       const row: Record<string, unknown> = {
         phase_id: phaseId,
         name: service.name,
         unit: service.unit,
         base_price: bringsPrice ? incomingPrice : estimate ?? 0,
-        code,
+        code: assignedCode,
         origin: 'excel',
         price_min: market?.band.price_min ?? null,
         price_max: market?.band.price_max ?? null

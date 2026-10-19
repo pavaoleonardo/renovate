@@ -584,9 +584,9 @@ export default function CatalogPage() {
           <a
             href="/api/catalog/template"
             className="flex items-center gap-2 bg-white border border-zinc-200 hover:bg-zinc-100 text-zinc-900 px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95"
-            title="Descarga tus partidas en Excel, edítalas y vuelve a importarlas"
+            title="Descarga tu catálogo completo en Excel, edítalo y vuelve a importarlo"
           >
-            <Download size={16} /> Plantilla Excel
+            <Download size={16} /> Exportar Excel
           </a>
         </div>
       </div>

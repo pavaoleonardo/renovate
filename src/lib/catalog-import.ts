@@ -205,6 +205,59 @@ export function importLineKey(phaseName: string, serviceName: string): string {
   return `${catalogKey(phaseName)}|${catalogKey(serviceName)}`
 }
 
+/** ¿La línea trae un precio de verdad? Un 0 sin la marca es «sin precio». */
+const bringsPrice = (service: ImportedServiceInput) =>
+  service.has_price === true ||
+  (service.has_price === undefined && Number.isFinite(Number(service.base_price)) && Number(service.base_price) > 0)
+
+/**
+ * Une las líneas repetidas de una misma sección antes de escribir nada.
+ *
+ * Un documento repite la misma partida más veces de las que parece (una celda partida
+ * en dos filas, dos presupuestos pegados uno detrás de otro), y el importador las
+ * guardaba todas: la empresa acababa con «Mano de obra en colocación de plaqueta…» dos
+ * veces en la misma sección, que es exactamente lo que la fusión tenía que evitar. El
+ * resumen previo ya las contaba una vez; ahora la escritura hace lo mismo.
+ *
+ * Manda la primera línea con precio (las demás sólo rellenan lo que falte), porque
+ * cambiar el precio de una partida repetida por el de una copia sin precio sería
+ * perder el dato bueno.
+ */
+export function dedupeImportedServices(services: ImportedServiceInput[]): ImportedServiceInput[] {
+  const keptAt = new Map<string, number>()
+  const kept: ImportedServiceInput[] = []
+
+  for (const service of services) {
+    const key = catalogKey(String(service.name ?? ''))
+    // Una línea sin nombre no se puede fusionar con nada: la descarta el que escribe.
+    if (!key) {
+      kept.push(service)
+      continue
+    }
+
+    const index = keptAt.get(key)
+    if (index === undefined) {
+      keptAt.set(key, kept.length)
+      kept.push(service)
+      continue
+    }
+
+    const previous = kept[index]
+    const previousPriced = bringsPrice(previous)
+    const incomingPriced = bringsPrice(service)
+    kept[index] = {
+      ...previous,
+      name: previous.name,
+      unit: previous.unit || service.unit,
+      base_price: !previousPriced && incomingPriced ? service.base_price : previous.base_price,
+      has_price: previousPriced || incomingPriced ? true : previous.has_price,
+      code: previous.code ?? service.code ?? null
+    }
+  }
+
+  return kept
+}
+
 /**
  * La misma sección empuja la nota hacia arriba: una partida repetida dentro de su
  * fase es más probablemente la misma que una que casualmente se llama parecido en

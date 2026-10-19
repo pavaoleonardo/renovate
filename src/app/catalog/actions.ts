@@ -26,6 +26,7 @@ import {
   type ServiceMatch
 } from '@/lib/catalog-import'
 import { bandSuggestedPrice, findMarketMatch, matchPhaseName, nameSimilarity } from '@/lib/catalog-match'
+import { nextServiceCode, phaseCodePrefix } from '@/lib/catalog-codes'
 import { AI_RATE_LIMIT_MESSAGE, IMPORT_AI_ENDPOINT, LAYOUT_AI_ENDPOINT, aiRateLimitReached, askOpenAiJson, recordAiCall } from '@/lib/ai'
 import { layoutDigest, layoutPrompt, validateLayoutAnswer, type LayoutVerdict } from '@/lib/import-layout-ai'
 import { parsePriceInput } from '@/lib/price-input'
@@ -1171,6 +1172,23 @@ export async function deleteCatalogPhase(phaseId: string) {
 
 export async function addCatalogService(phaseId: string, service: { name: string; unit: string; base_price: number }) {
   const supabase = createClient()
+  const companyId = await getCompanyId()
+  if (!companyId) return { success: false, error: 'No se encontró la empresa del usuario.' }
+
+  // La sección se comprueba por empresa (y de su nombre sale el prefijo del código).
+  const { data: phase } = await supabase
+    .from('catalog_phases')
+    .select('id, name')
+    .eq('id', phaseId)
+    .eq('company_id', companyId)
+    .single()
+  if (!phase) return { success: false, error: 'No se encontró la sección en tu catálogo.' }
+
+  // Un código como el de las partidas del catálogo por defecto («DEM-007»), para que
+  // una partida añadida a mano se pueda citar igual que las demás.
+  const { data: siblings } = await supabase.from('catalog_services').select('code').eq('phase_id', phaseId)
+  const codes = ((siblings ?? []) as { code: string | null }[]).map((row) => row.code)
+  const code = nextServiceCode(phaseCodePrefix(String(phase.name), codes), codes)
 
   const { error } = await supabase.from('catalog_services').insert({
     phase_id: phaseId,
@@ -1178,6 +1196,7 @@ export async function addCatalogService(phaseId: string, service: { name: string
     unit: service.unit.trim() || 'ud',
     base_price: service.base_price,
     origin: 'manual',
+    code,
   })
 
   if (error) return { success: false, error: catalogErrorMessage(error.message) }

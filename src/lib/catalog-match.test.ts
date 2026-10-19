@@ -130,7 +130,7 @@ describe('findMarketMatch', () => {
   })
 
   it('una línea escrita de otra forma también hereda la banda (por parecido)', () => {
-    const match = findMarketMatch({ name: 'Pintado con pintura plástica de paredes', unit: 'm2' })!
+    const match = findMarketMatch({ name: 'Pintura plástica mate en paredes', unit: 'm2' })!
     expect(match.reason).toBe('similar')
     expect(match.band.code).toBe(pintura.code)
   })
