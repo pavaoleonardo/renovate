@@ -744,7 +744,7 @@ export default function CatalogPage() {
                   className="w-full text-left p-4 rounded-xl border-2 border-blue-200 bg-blue-50/50 hover:bg-blue-50 disabled:opacity-60 disabled:cursor-progress transition active:scale-[0.99]"
                 >
                   {seedBusy === 'merge' ? (
-                    <ConstructionLoader variant="crane" size="sm" label="Añadiendo el catálogo por defecto…" />
+                    <ConstructionLoader size="sm" label="Añadiendo el catálogo por defecto…" />
                   ) : (
                     <>
                       <div className="font-bold text-blue-900 flex items-center gap-2">
@@ -790,7 +790,7 @@ export default function CatalogPage() {
                     className="flex flex-1 items-center justify-center bg-red-600 hover:bg-red-700 disabled:bg-zinc-500 text-white px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95 disabled:cursor-progress"
                   >
                     {seedBusy === 'replace' ? (
-                      <ConstructionLoader variant="crane" size="sm" tone="invert" label="Reemplazando…" />
+                      <ConstructionLoader size="sm" tone="invert" label="Reemplazando…" />
                     ) : (
                       'Sí, reemplazar'
                     )}
@@ -906,7 +906,7 @@ export default function CatalogPage() {
             className="h-[42px] inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-500 text-white px-5 rounded-lg font-bold text-sm transition active:scale-95 disabled:cursor-progress"
           >
             {adding ? (
-              <ConstructionLoader variant="crane" size="sm" tone="invert" label="Añadiendo…" />
+              <ConstructionLoader size="sm" tone="invert" label="Añadiendo…" />
             ) : (
               'Añadir'
             )}
@@ -920,7 +920,7 @@ export default function CatalogPage() {
             pantalla y el loader parecía vivir en el botón equivocado. */}
         {busyLabel && (
           <div className="mb-3 rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2.5">
-            <ConstructionLoader variant="crane" size="sm" label={busyLabel} />
+            <ConstructionLoader size="sm" label={busyLabel} />
             <p className="mt-1 pl-[34px] text-[11px] font-medium leading-snug text-blue-900/70">
               Se hace en el servidor: no cierres esta pestaña.
             </p>
@@ -1202,7 +1202,7 @@ export default function CatalogPage() {
                         className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-500 rounded px-2 py-1 transition disabled:cursor-progress"
                       >
                         {matchBusy ? (
-                          <ConstructionLoader variant="level" size="sm" tone="invert" label="Consultando…" />
+                          <ConstructionLoader size="sm" tone="invert" label="Consultando…" />
                         ) : (
                           <>
                             <Sparkles size={12} /> Volver a preguntar a la IA
@@ -1401,16 +1401,18 @@ export default function CatalogPage() {
         <h2 className="text-lg font-black text-zinc-400 uppercase tracking-wider">Partidas</h2>
         <button
           onClick={fetchCatalog}
-          className="p-2 text-zinc-400 hover:text-zinc-900 transition hover:bg-zinc-100 rounded-full"
+          disabled={loading}
+          aria-busy={loading}
+          className="p-2 text-zinc-400 hover:text-zinc-900 transition hover:bg-zinc-100 rounded-full disabled:cursor-progress disabled:text-zinc-300 disabled:hover:bg-transparent"
           title="Actualizar catálogo"
         >
-          <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+          {loading ? <ConstructionLoader size="sm" /> : <RefreshCw size={18} />}
         </button>
       </div>
 
       {loading ? (
         <div className="bg-white rounded-2xl border border-zinc-100 p-8">
-          <ConstructionLoader variant="wall" size="lg" label="Colocando tus partidas…" />
+          <ConstructionLoader size="lg" label="Colocando tus partidas…" />
           <div className="mt-6 space-y-2.5">
             {CATALOG_SKELETON_WIDTHS.map((width, index) => (
               <div key={index} className="flex items-center gap-3">

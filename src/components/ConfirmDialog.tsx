@@ -109,7 +109,7 @@ export default function ConfirmDialog({
             }`}
           >
             {pending ? (
-              <ConstructionLoader variant="wall" size="sm" tone="invert" label={pendingLabel} />
+              <ConstructionLoader size="sm" tone="invert" label={pendingLabel} />
             ) : (
               confirmLabel
             )}

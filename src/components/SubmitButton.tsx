@@ -2,7 +2,7 @@
 
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { useFormStatus } from 'react-dom'
-import ConstructionLoader, { type LoaderTone, type LoaderVariant } from '@/components/ConstructionLoader'
+import ConstructionLoader, { type LoaderTone } from '@/components/ConstructionLoader'
 
 /**
  * A submit button that tells the truth while its form is in flight.
@@ -16,7 +16,6 @@ export default function SubmitButton({
   children,
   pendingLabel = 'Guardando…',
   pendingHint,
-  variant = 'crane',
   tone = 'invert',
   className = '',
   ...rest
@@ -26,7 +25,6 @@ export default function SubmitButton({
   pendingLabel?: string
   /** Optional second line, for a wait that deserves an explanation. */
   pendingHint?: string
-  variant?: LoaderVariant
   tone?: LoaderTone
   className?: string
 } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'className'>) {
@@ -42,7 +40,7 @@ export default function SubmitButton({
     >
       {pending ? (
         <span className="inline-flex flex-col items-center justify-center gap-0.5">
-          <ConstructionLoader variant={variant} size="sm" tone={tone} label={pendingLabel} />
+          <ConstructionLoader size="sm" tone={tone} label={pendingLabel} />
           {pendingHint ? (
             <span className={`text-[10px] font-semibold ${tone === 'invert' ? 'text-white/80' : 'text-zinc-500'}`}>
               {pendingHint}

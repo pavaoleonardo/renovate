@@ -1,4 +1,4 @@
-import ConstructionLoader, { type LoaderVariant } from '@/components/ConstructionLoader'
+import ConstructionLoader from '@/components/ConstructionLoader'
 
 /**
  * What a route shows while its server component is still fetching.
@@ -16,18 +16,16 @@ export default function RouteSkeleton({
   label,
   hint,
   rows = 4,
-  variant = 'wall',
 }: {
   label: string
   hint?: string
   rows?: number
-  variant?: LoaderVariant
 }) {
   return (
     <div role="status" aria-live="polite" className="max-w-shell mx-auto py-12 px-4 sm:px-6 lg:px-8">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
         <div>
-          <ConstructionLoader variant={variant} size="lg" label={label} />
+          <ConstructionLoader size="lg" label={label} />
           <p className="text-zinc-400 text-sm font-medium mt-2 pl-[4.25rem]">
             {hint ?? 'Un momento: los datos vienen de la base de datos.'}
           </p>

@@ -1,4 +1,4 @@
-import ConstructionLoader, { type LoaderVariant } from '@/components/ConstructionLoader'
+import ConstructionLoader from '@/components/ConstructionLoader'
 
 /**
  * Full-screen wait, for a job that owns the page: reading an Excel, importing
@@ -12,11 +12,9 @@ import ConstructionLoader, { type LoaderVariant } from '@/components/Constructio
 export default function LoadingOverlay({
   label,
   hint,
-  variant = 'crane',
 }: {
   label: string
   hint?: string
-  variant?: LoaderVariant
 }) {
   return (
     <div
@@ -26,7 +24,7 @@ export default function LoadingOverlay({
       aria-busy="true"
     >
       <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl border border-zinc-200 bg-white px-8 py-8 shadow-[0_10px_40px_rgba(0,0,0,0.10)]">
-        <ConstructionLoader variant={variant} size="lg" />
+        <ConstructionLoader size="lg" />
         <p className="text-center text-sm font-bold text-zinc-900">{label}</p>
         {hint ? <p className="text-center text-xs font-medium leading-snug text-zinc-500">{hint}</p> : null}
       </div>

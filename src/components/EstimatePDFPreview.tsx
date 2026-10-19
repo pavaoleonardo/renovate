@@ -253,7 +253,7 @@ export default function EstimatePDFPreview({
               className="flex items-center gap-2 bg-white border border-zinc-300 hover:bg-zinc-50 text-zinc-800 px-3 sm:px-4 py-2 rounded-lg font-bold transition text-sm disabled:opacity-70 disabled:cursor-progress"
             >
               {generating ? (
-                <ConstructionLoader variant="crane" size="sm" label="Generando…" />
+                <ConstructionLoader size="sm" label="Generando…" />
               ) : (
                 <>
                   <Download size={16} /> <span className="hidden sm:inline">PDF</span>
@@ -293,7 +293,7 @@ export default function EstimatePDFPreview({
                 }`}
               >
                 {busyAction === 'email' ? (
-                  <ConstructionLoader variant="crane" size="sm" tone="invert" label="Preparando el PDF…" />
+                  <ConstructionLoader size="sm" tone="invert" label="Preparando el PDF…" />
                 ) : shareSupported ? (
                   'Compartir por email'
                 ) : (
@@ -328,7 +328,7 @@ export default function EstimatePDFPreview({
                 }`}
               >
                 {busyAction === 'whatsapp' ? (
-                  <ConstructionLoader variant="crane" size="sm" tone="invert" label="Preparando el PDF…" />
+                  <ConstructionLoader size="sm" tone="invert" label="Preparando el PDF…" />
                 ) : shareSupported ? (
                   'Compartir por WhatsApp'
                 ) : (

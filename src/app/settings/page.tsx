@@ -91,7 +91,7 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-        <ConstructionLoader variant="mixer" size="lg" label="Cargando los datos de tu empresa…" />
+        <ConstructionLoader size="lg" label="Cargando los datos de tu empresa…" />
         <div className="animate-pulse space-y-4 mt-6">
           <div className="h-8 bg-zinc-200 rounded w-48"></div>
           <div className="h-64 bg-zinc-100 rounded-xl"></div>
@@ -149,7 +149,7 @@ export default function SettingsPage() {
             </div>
             {uploading && (
               <div className="absolute inset-0 bg-white/85 flex items-center justify-center">
-                <ConstructionLoader variant="mixer" size="md" />
+                <ConstructionLoader size="md" />
               </div>
             )}
           </div>
@@ -236,7 +236,7 @@ export default function SettingsPage() {
             {saved ? (
               <><CheckCircle2 size={18} /> Guardado</>
             ) : saving ? (
-              <ConstructionLoader variant="crane" size="sm" tone="invert" label="Guardando…" />
+              <ConstructionLoader size="sm" tone="invert" label="Guardando…" />
             ) : (
               <><Save size={18} /> Guardar Cambios</>
             )}

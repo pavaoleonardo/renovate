@@ -12,7 +12,7 @@ export default function EstimateEditorSkeleton() {
   return (
     <div role="status" aria-live="polite" className="max-w-shell mx-auto py-10 px-4 sm:px-6 lg:px-8">
       <div className="mb-6">
-        <ConstructionLoader variant="crane" size="lg" label="Abriendo el presupuesto…" />
+        <ConstructionLoader size="lg" label="Abriendo el presupuesto…" />
         <p className="text-zinc-400 text-sm font-medium mt-2 pl-[4.25rem]">
           Cargando las partidas, el catálogo y los datos de la empresa.
         </p>

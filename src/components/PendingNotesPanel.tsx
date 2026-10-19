@@ -71,7 +71,7 @@ export default function PendingNotesPanel({
                 className="shrink-0 flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1 rounded-md transition disabled:opacity-60 disabled:cursor-progress"
               >
                 {busyId === note.id ? (
-                  <ConstructionLoader variant="crane" size="sm" label="Convirtiendo…" />
+                  <ConstructionLoader size="sm" label="Convirtiendo…" />
                 ) : (
                   <><Check size={14} /> Convertir</>
                 )}

@@ -50,7 +50,7 @@ export default function DeleteObraButton({ estimateId, address }: { estimateId: 
         className="flex items-center gap-1.5 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1.5 rounded-lg font-bold text-xs transition disabled:opacity-60 disabled:cursor-progress whitespace-nowrap"
       >
         {deleting ? (
-          <ConstructionLoader variant="wall" size="sm" label="Eliminando…" />
+          <ConstructionLoader size="sm" label="Eliminando…" />
         ) : (
           <><Trash2 size={14} /> Eliminar</>
         )}

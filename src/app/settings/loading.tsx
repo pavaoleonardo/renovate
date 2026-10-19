@@ -4,7 +4,7 @@ import ConstructionLoader from '@/components/ConstructionLoader'
 export default function Loading() {
   return (
     <div role="status" aria-live="polite" className="max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-      <ConstructionLoader variant="mixer" size="lg" label="Cargando los datos de tu empresa…" />
+      <ConstructionLoader size="lg" label="Cargando los datos de tu empresa…" />
       <p className="text-zinc-400 text-sm font-medium mt-2 pl-[4.25rem]">
         Nombre, CIF, contacto y logo: es lo que firma cada presupuesto.
       </p>

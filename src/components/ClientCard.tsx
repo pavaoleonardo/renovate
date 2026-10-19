@@ -109,7 +109,7 @@ export default function ClientCard({ client }: { client: Client }) {
           className="flex items-center gap-2 bg-zinc-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold text-sm transition disabled:bg-zinc-700 disabled:cursor-progress"
         >
           {saving ? (
-            <ConstructionLoader variant="crane" size="sm" tone="invert" label="Guardando…" />
+            <ConstructionLoader size="sm" tone="invert" label="Guardando…" />
           ) : (
             <><Save size={16} /> Guardar ficha</>
           )}
@@ -129,7 +129,7 @@ export default function ClientCard({ client }: { client: Client }) {
           className="ml-auto flex items-center gap-2 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-4 py-2 rounded-lg font-bold text-sm transition disabled:opacity-60 disabled:cursor-progress"
         >
           {deleting ? (
-            <ConstructionLoader variant="wall" size="sm" label="Eliminando…" />
+            <ConstructionLoader size="sm" label="Eliminando…" />
           ) : (
             <><Trash2 size={16} /> Eliminar</>
           )}
