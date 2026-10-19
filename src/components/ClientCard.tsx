@@ -6,6 +6,7 @@ import { Client } from '@/types';
 import { deleteClient, updateClient } from '@/app/actions';
 import AutoGrowTextarea from './AutoGrowTextarea';
 import ConstructionLoader from './ConstructionLoader';
+import ConfirmDialog from './ConfirmDialog';
 import { CheckCircle2, Save, Trash2 } from 'lucide-react';
 
 const inputClass =
@@ -28,6 +29,9 @@ export default function ClientCard({ client }: { client: Client }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  /** La pregunta de borrado vive en un diálogo propio: `window.confirm` no puede enseñar
+   *  nada mientras el borrado corre. */
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const set = (key: keyof typeof draft, value: string) => setDraft((prev) => ({ ...prev, [key]: value }));
@@ -49,16 +53,18 @@ export default function ClientCard({ client }: { client: Client }) {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`¿Eliminar la ficha de «${client.name}»?`)) return;
     setDeleting(true);
     setError(null);
-    const res = await deleteClient(client.id);
-    if (!res.success) {
-      setError(res.error);
+    try {
+      const res = await deleteClient(client.id);
+      if (!res.success) {
+        setError(res.error);
+        return;
+      }
+      router.push('/clients');
+    } finally {
       setDeleting(false);
-      return;
     }
-    router.push('/clients');
   };
 
   return (
@@ -114,7 +120,10 @@ export default function ClientCard({ client }: { client: Client }) {
           </span>
         )}
         <button
-          onClick={handleDelete}
+          onClick={() => {
+            setError(null);
+            setConfirmOpen(true);
+          }}
           disabled={deleting}
           title="Solo se puede borrar un cliente sin obras"
           className="ml-auto flex items-center gap-2 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-4 py-2 rounded-lg font-bold text-sm transition disabled:opacity-60 disabled:cursor-progress"
@@ -126,6 +135,20 @@ export default function ClientCard({ client }: { client: Client }) {
           )}
         </button>
       </div>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Eliminar la ficha"
+        description={<>Se borrará «{client.name}» de tu lista de clientes. Las obras tienen que estar eliminadas antes.</>}
+        confirmLabel="Eliminar la ficha"
+        pendingLabel="Eliminando…"
+        pending={deleting}
+        error={error}
+        onConfirm={handleDelete}
+        onCancel={() => {
+          if (!deleting) setConfirmOpen(false);
+        }}
+      />
     </div>
   );
 }

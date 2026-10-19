@@ -77,6 +77,13 @@ export async function recordAiCall(supabase: Db, companyId: string, endpoint: st
 }
 
 /**
+ * Techo duro para una llamada. Sin él, una conexión que se queda colgada mantiene viva
+ * la promesa del llamante —y el loader que el usuario está mirando— todo lo que el
+ * socket quiera: así es como un spinner acaba «girando siempre».
+ */
+const AI_TIMEOUT_MS = 45_000
+
+/**
  * Pide a OpenAI un objeto JSON y lo devuelve ya parseado.
  *
  * Lanza un error cuyo mensaje se puede enseñar tal cual: falta la clave, el texto de
@@ -88,28 +95,40 @@ export async function askOpenAiJson<T>(prompt: string, temperature = 0.5): Promi
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) throw new Error('OpenAI API key not configured')
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: AI_MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      response_format: { type: 'json_object' },
-      temperature,
-    }),
-  })
-
-  if (!response.ok) throw new Error(await response.text())
-
-  const data = await response.json()
-  const content = data.choices?.[0]?.message?.content || '{}'
-
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS)
   try {
-    return JSON.parse(content) as T
-  } catch {
-    throw new Error('Failed to parse AI response')
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        response_format: { type: 'json_object' },
+        temperature,
+      }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) throw new Error(await response.text())
+
+    const data = await response.json()
+    const content = data.choices?.[0]?.message?.content || '{}'
+
+    try {
+      return JSON.parse(content) as T
+    } catch {
+      throw new Error('Failed to parse AI response')
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('La IA tardó demasiado en responder.')
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
   }
 }

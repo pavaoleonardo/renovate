@@ -38,7 +38,7 @@ export default function SubmitButton({
       type="submit"
       disabled={pending || rest.disabled}
       aria-busy={pending}
-      className={`${className} disabled:cursor-progress`}
+      className={`${className} ${pending ? 'cursor-progress' : 'disabled:cursor-not-allowed'}`}
     >
       {pending ? (
         <span className="inline-flex flex-col items-center justify-center gap-0.5">

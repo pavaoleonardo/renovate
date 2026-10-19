@@ -19,7 +19,7 @@ import { parsePriceInput } from '@/lib/price-input'
 import { hasMarketBand } from '@/lib/market-band'
 import { AlertCircle, CheckCircle2, Box, Download, Plus, RefreshCw, Search, Sparkles, Trash2, UploadCloud, X } from 'lucide-react'
 import ConstructionLoader from '@/components/ConstructionLoader'
-import LoadingOverlay from '@/components/LoadingOverlay'
+import ConfirmDialog from '@/components/ConfirmDialog'
 import { CatalogService, ExcelPreview, ExcelPreviewMatch } from '@/types'
 
 const UNITS = ['m2', 'ml', 'm3', 'ud', 'kg', 'h', 'vg']
@@ -180,6 +180,18 @@ export default function CatalogPage() {
   const [matchNote, setMatchNote] = useState<string | null>(null)
   const [matchBusy, setMatchBusy] = useState(false)
   const [seedStep, setSeedStep] = useState<null | 'choose' | 'confirm-replace'>(null)
+  /** Qué opción del diálogo del catálogo por defecto se está ejecutando: su botón lleva el loader. */
+  const [seedBusy, setSeedBusy] = useState<null | 'merge' | 'replace'>(null)
+  /** Qué se ha pedido borrar. La confirmación vive en el diálogo, con el loader dentro. */
+  const [deleteTarget, setDeleteTarget] = useState<
+    | null
+    | { kind: 'service'; service: CatalogService }
+    | { kind: 'section'; phaseId: string; phaseName: string; count: number }
+  >(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  /** Añadir una partida a mano: su botón lleva el loader, y sólo él. */
+  const [adding, setAdding] = useState(false)
   const [newService, setNewService] = useState({ phaseId: '', name: '', unit: 'ud', price: '' })
   /**
    * Fila cuya banda de mercado se está editando, con los dos extremos tal como se escriben.
@@ -188,12 +200,20 @@ export default function CatalogPage() {
 
   const fetchCatalog = useCallback(async () => {
     setLoading(true)
-    const [catalog, phaseList] = await Promise.all([searchCatalog(), listCatalogPhases()])
-    setServices(catalog || [])
-    setPhases(phaseList || [])
-    setNewService((prev) => ({ ...prev, phaseId: prev.phaseId || phaseList?.[0]?.id || '' }))
-    setLoading(false)
-    return catalog || []
+    try {
+      const [catalog, phaseList] = await Promise.all([searchCatalog(), listCatalogPhases()])
+      setServices(catalog || [])
+      setPhases(phaseList || [])
+      setNewService((prev) => ({ ...prev, phaseId: prev.phaseId || phaseList?.[0]?.id || '' }))
+      return catalog || []
+    } catch {
+      // Sin respuesta no hay catálogo que enseñar, pero la página no puede quedarse girando
+      // para siempre: el icono de actualizar dejaría de ser una promesa y sería una mentira.
+      setResult({ success: false, text: 'No se pudo cargar tu catálogo. Revisa tu conexión y vuelve a intentarlo.' })
+      return []
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   // First visit: if the company has no catalog yet, load the default one.
@@ -210,36 +230,44 @@ export default function CatalogPage() {
     })()
   }, [fetchCatalog])
 
+  /**
+   * Carga el catálogo por defecto **desde el propio diálogo**: el botón pulsado lleva el
+   * loader y la pregunta sigue a la vista. Antes una capa blanca tapaba la pantalla
+   * mientras corría, escondiendo justo el diálogo que se acababa de contestar.
+   */
   const runSeed = async (mode: 'merge' | 'replace') => {
     setBusy(true)
-    setBusyLabel(mode === 'replace' ? 'Reemplazando tu catálogo…' : 'Añadiendo el catálogo por defecto…')
+    setSeedBusy(mode)
     setResult(null)
-    const res = await seedDefaultCatalog({ mode }).catch(() => null)
-    setBusy(false)
-    setBusyLabel(null)
-    setSeedStep(null)
+    try {
+      const res = await seedDefaultCatalog({ mode }).catch(() => null)
 
-    if (!res) {
-      setResult({ success: false, text: 'No se pudo cargar el catálogo por defecto. Revisa tu conexión.' })
-      return
+      if (!res) {
+        setResult({ success: false, text: 'No se pudo cargar el catálogo por defecto. Revisa tu conexión.' })
+        return
+      }
+
+      if (!res.success) {
+        setResult({ success: false, text: res.error || 'No se pudo cargar el catálogo por defecto.' })
+        return
+      }
+
+      if (mode === 'replace') {
+        setResult({ success: true, text: `Catálogo reemplazado: ${res.servicesCreated} partidas del catálogo por defecto.` })
+      } else if (res.servicesCreated > 0 || res.phasesCreated > 0) {
+        const parts = [`${res.servicesCreated} partidas añadidas`, `${res.phasesCreated} secciones nuevas`]
+        if (res.servicesSkipped > 0) parts.push(`${res.servicesSkipped} ya existían`)
+        setResult({ success: true, text: `Catálogo por defecto añadido: ${parts.join(', ')}.` })
+      } else {
+        setResult({ success: true, text: 'Tu catálogo ya tenía todas las partidas del catálogo por defecto.' })
+      }
+
+      await fetchCatalog()
+    } finally {
+      setBusy(false)
+      setSeedBusy(null)
+      setSeedStep(null)
     }
-
-    if (!res.success) {
-      setResult({ success: false, text: res.error || 'No se pudo cargar el catálogo por defecto.' })
-      return
-    }
-
-    if (mode === 'replace') {
-      setResult({ success: true, text: `Catálogo reemplazado: ${res.servicesCreated} partidas del catálogo por defecto.` })
-    } else if (res.servicesCreated > 0 || res.phasesCreated > 0) {
-      const parts = [`${res.servicesCreated} partidas añadidas`, `${res.phasesCreated} secciones nuevas`]
-      if (res.servicesSkipped > 0) parts.push(`${res.servicesSkipped} ya existían`)
-      setResult({ success: true, text: `Catálogo por defecto añadido: ${parts.join(', ')}.` })
-    } else {
-      setResult({ success: true, text: 'Tu catálogo ya tenía todas las partidas del catálogo por defecto.' })
-    }
-
-    await fetchCatalog()
   }
 
   /**
@@ -275,42 +303,47 @@ export default function CatalogPage() {
       // Cada análisis es una revisión nueva: lo que se había marcado del anterior no vale.
       setIncludeDropped(false)
 
-      const formData = new FormData()
-      formData.append('file', selected)
-      if (options.priceCol !== null) formData.append('priceCol', String(options.priceCol))
-      if (options.noPrices) formData.append('noPrices', '1')
-      // El primer análisis de un documento pregunta a la IA por las líneas dudosas, sin
-      // que nadie pulse nada: una sola llamada. Volver a analizar el mismo archivo con
-      // otra columna de precio no vuelve a preguntar (y no gasta otra llamada).
-      if (options.autoAi) formData.append('autoAi', '1')
+      try {
+        const formData = new FormData()
+        formData.append('file', selected)
+        if (options.priceCol !== null) formData.append('priceCol', String(options.priceCol))
+        if (options.noPrices) formData.append('noPrices', '1')
+        // El primer análisis de un documento pregunta a la IA por las líneas dudosas, sin
+        // que nadie pulse nada: una sola llamada. Volver a analizar el mismo archivo con
+        // otra columna de precio no vuelve a preguntar (y no gasta otra llamada).
+        if (options.autoAi) formData.append('autoAi', '1')
 
-      const res = await previewExcelUpload(formData).catch(() => null)
-      setBusy(false)
-      setBusyLabel(null)
+        const res = await previewExcelUpload(formData).catch(() => null)
 
-      if (!res) {
-        setPreview(null)
-        setResult({ success: false, text: 'No se pudo leer el documento. Revisa tu conexión e inténtalo de nuevo.' })
-        return
-      }
+        if (!res) {
+          setPreview(null)
+          setResult({ success: false, text: 'No se pudo leer el documento. Revisa tu conexión e inténtalo de nuevo.' })
+          return
+        }
 
-      if (!res.success) {
-        setPreview(null)
-        setResult({ success: false, text: res.error || 'No se pudo analizar el documento.' })
-        return
-      }
+        if (!res.success) {
+          setPreview(null)
+          setResult({ success: false, text: res.error || 'No se pudo analizar el documento.' })
+          return
+        }
 
-      const next = res.preview ?? null
-      setPreview(next)
-      // La columna que ha propuesto la IA para los precios se queda elegida: así el
-      // «confirmar» la manda tal cual (y no vuelve a preguntar) y el usuario la ve.
-      if (next?.priceColumn.aiChosen) setPriceCol(next.priceColumn.index)
-      if (options.autoAi && next) {
-        applySuggestions(
-          next.ai?.suggestions ?? [],
-          next.matches.filter((match) => match.status === 'similar').map((match) => match.key),
-          next.ai?.note ?? null
-        )
+        const next = res.preview ?? null
+        setPreview(next)
+        // La columna que ha propuesto la IA para los precios se queda elegida: así el
+        // «confirmar» la manda tal cual (y no vuelve a preguntar) y el usuario la ve.
+        if (next?.priceColumn.aiChosen) setPriceCol(next.priceColumn.index)
+        if (options.autoAi && next) {
+          applySuggestions(
+            next.ai?.suggestions ?? [],
+            next.matches.filter((match) => match.status === 'similar').map((match) => match.key),
+            next.ai?.note ?? null
+          )
+        }
+      } finally {
+        // Pase lo que pase, el loader termina: un fallo de la acción no puede dejar la
+        // tarjeta girando indefinidamente.
+        setBusy(false)
+        setBusyLabel(null)
       }
     },
     [applySuggestions]
@@ -346,37 +379,40 @@ export default function CatalogPage() {
     setBusyLabel('Importando las partidas…')
     setResult(null)
 
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('mode', importMode)
-    if (priceCol !== null) formData.append('priceCol', String(priceCol))
-    if (noPrices) formData.append('noPrices', '1')
-    formData.append('fillMissing', fillMissing ? '1' : '0')
-    if (Object.keys(decisions).length > 0) formData.append('decisions', JSON.stringify(decisions))
-    // La revisión aprobada viaja con los índices que enseñó la vista previa: son los
-    // mismos que el servidor vuelve a leer del archivo, así que se aplica lo que se vio.
-    if (preview) {
-      const review = includeDropped ? { ...preview.review.post, drop: [] } : preview.review.post
-      formData.append('review', JSON.stringify(review))
-    }
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('mode', importMode)
+      if (priceCol !== null) formData.append('priceCol', String(priceCol))
+      if (noPrices) formData.append('noPrices', '1')
+      formData.append('fillMissing', fillMissing ? '1' : '0')
+      if (Object.keys(decisions).length > 0) formData.append('decisions', JSON.stringify(decisions))
+      // La revisión aprobada viaja con los índices que enseñó la vista previa: son los
+      // mismos que el servidor vuelve a leer del archivo, así que se aplica lo que se vio.
+      if (preview) {
+        const review = includeDropped ? { ...preview.review.post, drop: [] } : preview.review.post
+        formData.append('review', JSON.stringify(review))
+      }
 
-    const res = await processExcelUpload(formData).catch(() => null)
-    setBusy(false)
-    setBusyLabel(null)
-    if (!res) {
-      setResult({ success: false, text: 'No se pudo importar el documento. Revisa tu conexión e inténtalo de nuevo.' })
-    } else if (res.success) {
-      setFile(null)
-      setPreview(null)
-      setPriceCol(null)
-      setNoPrices(false)
-      setDecisions({})
-      setMatchNote(null)
-      setIncludeDropped(false)
-      setResult({ success: true, text: res.message || 'Documento importado.' })
-      await fetchCatalog()
-    } else {
-      setResult({ success: false, text: res.error || 'No se pudo importar el documento.' })
+      const res = await processExcelUpload(formData).catch(() => null)
+      if (!res) {
+        setResult({ success: false, text: 'No se pudo importar el documento. Revisa tu conexión e inténtalo de nuevo.' })
+      } else if (res.success) {
+        setFile(null)
+        setPreview(null)
+        setPriceCol(null)
+        setNoPrices(false)
+        setDecisions({})
+        setMatchNote(null)
+        setIncludeDropped(false)
+        setResult({ success: true, text: res.message || 'Documento importado.' })
+        await fetchCatalog()
+      } else {
+        setResult({ success: false, text: res.error || 'No se pudo importar el documento.' })
+      }
+    } finally {
+      setBusy(false)
+      setBusyLabel(null)
     }
   }
 
@@ -407,30 +443,33 @@ export default function CatalogPage() {
     setMatchBusy(true)
     setMatchNote(null)
 
-    const formData = new FormData()
-    formData.append('file', file)
-    if (priceCol !== null) formData.append('priceCol', String(priceCol))
-    if (noPrices) formData.append('noPrices', '1')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      if (priceCol !== null) formData.append('priceCol', String(priceCol))
+      if (noPrices) formData.append('noPrices', '1')
 
-    const res = await suggestItemMatches(formData).catch(() => null)
-    setMatchBusy(false)
+      const res = await suggestItemMatches(formData).catch(() => null)
 
-    if (!res) {
-      setMatchNote('No se pudo consultar la IA. Revisa tu conexión e inténtalo de nuevo.')
-      return
+      if (!res) {
+        setMatchNote('No se pudo consultar la IA. Revisa tu conexión e inténtalo de nuevo.')
+        return
+      }
+
+      if (!res.success) {
+        setMatchNote(res.error || 'No se pudo consultar la IA.')
+        return
+      }
+
+      const suggestions = res.suggestions ?? []
+      applySuggestions(
+        suggestions,
+        doubtfulMatches.map((match) => match.key),
+        res.note || null
+      )
+    } finally {
+      setMatchBusy(false)
     }
-
-    if (!res.success) {
-      setMatchNote(res.error || 'No se pudo consultar la IA.')
-      return
-    }
-
-    const suggestions = res.suggestions ?? []
-    applySuggestions(
-      suggestions,
-      doubtfulMatches.map((match) => match.key),
-      res.note || null
-    )
   }
 
   const handleUpdate = async (
@@ -453,39 +492,54 @@ export default function CatalogPage() {
     if (!res.success) setResult({ success: false, text: res.error || 'No se pudo guardar el cambio.' })
   }
 
-  const handleDelete = async (service: CatalogService) => {
-    if (!window.confirm(`¿Eliminar «${service.name}» del catálogo?`)) return
-    setServices((prev) => prev.filter((s) => s.id !== service.id))
-    const res = await deleteCatalogService(service.id)
-    if (!res.success) {
-      setResult({ success: false, text: res.error || 'No se pudo eliminar.' })
-      await fetchCatalog()
-    }
+  /**
+   * Abre la confirmación de borrado. El diálogo sustituye a `window.confirm` porque éste
+   * congela la página y no puede enseñar nada mientras la partida se está borrando.
+   */
+  const askDeleteService = (service: CatalogService) => {
+    setDeleteError(null)
+    setDeleteTarget({ kind: 'service', service })
   }
 
   /**
-   * Deletes a whole section, partidas included.
-   *
-   * The confirmation states the count out loud: the button sits next to «N partidas», and a
-   * section of 40 lines should not vanish on a click that reads like a heading.
+   * Lo mismo para una sección entera. La confirmación dice el número en voz alta: el botón
+   * está al lado de «N partidas», y una sección de 40 líneas no puede esfumarse con un clic
+   * que parece un título.
    */
-  const handleDeleteSection = async (phaseId: string, phaseName: string, count: number) => {
-    const warning =
-      count > 0
-        ? `¿Eliminar la sección «${phaseName}» y sus ${count} partida${count === 1 ? '' : 's'}? Las partidas también se borran del catálogo.`
-        : `¿Eliminar la sección «${phaseName}»? No tiene ninguna partida.`
-    if (!window.confirm(warning)) return
+  const askDeleteSection = (phaseId: string, phaseName: string, count: number) => {
+    setDeleteError(null)
+    setDeleteTarget({ kind: 'section', phaseId, phaseName, count })
+  }
 
-    // Optimistic: the section disappears at once, and the reload puts back the truth.
-    setServices((prev) => prev.filter((s) => s.phase_id !== phaseId))
-    setPhases((prev) => prev.filter((p) => p.id !== phaseId))
-    setNewService((prev) => (prev.phaseId === phaseId ? { ...prev, phaseId: '' } : prev))
-
-    const res = await deleteCatalogPhase(phaseId)
-    if (!res.success) {
-      setResult({ success: false, text: res.error || 'No se pudo eliminar la sección.' })
+  /** Ejecuta lo que el diálogo confirmó y se cierra sólo si la acción fue bien. */
+  const runDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      if (deleteTarget.kind === 'service') {
+        // Optimista: la fila desaparece al momento y la recarga devuelve la verdad.
+        setServices((prev) => prev.filter((s) => s.id !== deleteTarget.service.id))
+        const res = await deleteCatalogService(deleteTarget.service.id)
+        if (!res.success) {
+          setDeleteError(res.error || 'No se pudo eliminar la partida.')
+          await fetchCatalog()
+          return
+        }
+      } else {
+        const { phaseId } = deleteTarget
+        setServices((prev) => prev.filter((s) => s.phase_id !== phaseId))
+        setPhases((prev) => prev.filter((p) => p.id !== phaseId))
+        setNewService((prev) => (prev.phaseId === phaseId ? { ...prev, phaseId: '' } : prev))
+        const res = await deleteCatalogPhase(phaseId)
+        if (!res.success) setDeleteError(res.error || 'No se pudo eliminar la sección.')
+        await fetchCatalog()
+        if (!res.success) return
+      }
+      setDeleteTarget(null)
+    } finally {
+      setDeleting(false)
     }
-    await fetchCatalog()
   }
 
   const handleAddService = async () => {
@@ -495,18 +549,23 @@ export default function CatalogPage() {
       return
     }
     setBusy(true)
-    const res = await addCatalogService(phaseId, {
-      name: newService.name,
-      unit: newService.unit,
-      base_price: Number(newService.price.replace(',', '.')) || 0,
-    })
-    setBusy(false)
-    if (res.success) {
-      setNewService({ phaseId, name: '', unit: 'ud', price: '' })
-      setShowAdd(false)
-      await fetchCatalog()
-    } else {
-      setResult({ success: false, text: res.error || 'No se pudo añadir la partida.' })
+    setAdding(true)
+    try {
+      const res = await addCatalogService(phaseId, {
+        name: newService.name,
+        unit: newService.unit,
+        base_price: Number(newService.price.replace(',', '.')) || 0,
+      })
+      if (res.success) {
+        setNewService({ phaseId, name: '', unit: 'ud', price: '' })
+        setShowAdd(false)
+        await fetchCatalog()
+      } else {
+        setResult({ success: false, text: res.error || 'No se pudo añadir la partida.' })
+      }
+    } finally {
+      setAdding(false)
+      setBusy(false)
     }
   }
 
@@ -514,10 +573,13 @@ export default function CatalogPage() {
     const name = window.prompt('Nombre de la nueva sección (ej. «Extras y varios»)')
     if (!name) return
     setBusy(true)
-    const res = await createCatalogPhase(name)
-    setBusy(false)
-    if (res.success && res.phase) setNewService((prev) => ({ ...prev, phaseId: res.phase!.id }))
-    await fetchCatalog()
+    try {
+      const res = await createCatalogPhase(name)
+      if (res.success && res.phase) setNewService((prev) => ({ ...prev, phaseId: res.phase!.id }))
+      await fetchCatalog()
+    } finally {
+      setBusy(false)
+    }
   }
 
   // Filtering happens on the client: the whole catalogue is already in memory, so
@@ -563,7 +625,7 @@ export default function CatalogPage() {
             <span className="text-[11px] font-bold text-zinc-300">0 partidas</span>
             <button
               type="button"
-              onClick={() => handleDeleteSection(phase.id, phase.name, 0)}
+              onClick={() => askDeleteSection(phase.id, phase.name, 0)}
               className="p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
               title="Eliminar la sección"
             >
@@ -577,9 +639,8 @@ export default function CatalogPage() {
 
   return (
     <div className="max-w-shell mx-auto py-12 px-4 sm:px-6 lg:px-8">
-      {/* A job that owns the page (read the Excel, import, seed) blocks the screen: it is
-          also what stops a second click from starting the same import twice. */}
-      {busyLabel && <LoadingOverlay label={busyLabel} hint="El trabajo se hace en el servidor: no cierres esta pestaña." />}
+      {/* El trabajo de este documento se ve **dentro de su tarjeta o de su diálogo**, no en
+          una capa blanca que tape la pantalla: el loader vive donde está el botón pulsado. */}
 
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
         <div>
@@ -680,17 +741,23 @@ export default function CatalogPage() {
                 <button
                   onClick={() => runSeed('merge')}
                   disabled={busy}
-                  className="w-full text-left p-4 rounded-xl border-2 border-blue-200 bg-blue-50/50 hover:bg-blue-50 disabled:opacity-60 transition active:scale-[0.99]"
+                  className="w-full text-left p-4 rounded-xl border-2 border-blue-200 bg-blue-50/50 hover:bg-blue-50 disabled:opacity-60 disabled:cursor-progress transition active:scale-[0.99]"
                 >
-                  <div className="font-bold text-blue-900 flex items-center gap-2">
-                    Añadir a lo que ya tengo
-                    <span className="text-[10px] font-black uppercase bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
-                      Recomendado
-                    </span>
-                  </div>
-                  <p className="text-xs text-blue-900/70 mt-1">
-                    Añade sólo las partidas que te falten (tienes {services.length}). No borra nada.
-                  </p>
+                  {seedBusy === 'merge' ? (
+                    <ConstructionLoader variant="crane" size="sm" label="Añadiendo el catálogo por defecto…" />
+                  ) : (
+                    <>
+                      <div className="font-bold text-blue-900 flex items-center gap-2">
+                        Añadir a lo que ya tengo
+                        <span className="text-[10px] font-black uppercase bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+                          Recomendado
+                        </span>
+                      </div>
+                      <p className="text-xs text-blue-900/70 mt-1">
+                        Añade sólo las partidas que te falten (tienes {services.length}). No borra nada.
+                      </p>
+                    </>
+                  )}
                 </button>
 
                 <button
@@ -720,9 +787,13 @@ export default function CatalogPage() {
                   <button
                     onClick={() => runSeed('replace')}
                     disabled={busy}
-                    className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-zinc-300 text-white px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95"
+                    className="flex flex-1 items-center justify-center bg-red-600 hover:bg-red-700 disabled:bg-zinc-500 text-white px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95 disabled:cursor-progress"
                   >
-                    Sí, reemplazar
+                    {seedBusy === 'replace' ? (
+                      <ConstructionLoader variant="crane" size="sm" tone="invert" label="Reemplazando…" />
+                    ) : (
+                      'Sí, reemplazar'
+                    )}
                   </button>
                   <button
                     onClick={() => setSeedStep('choose')}
@@ -745,6 +816,40 @@ export default function CatalogPage() {
           </div>
         </div>
       )}
+
+      {/* La confirmación de borrado, con el loader dentro: se ve que el borrado está en
+          marcha sin cerrar la pregunta ni tapar el catálogo. Si falla, el motivo se queda
+          aquí mismo y el diálogo sigue abierto. */}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={deleteTarget?.kind === 'section' ? 'Eliminar la sección' : 'Eliminar la partida'}
+        description={
+          deleteTarget?.kind === 'service' ? (
+            <>
+              «{deleteTarget.service.name}» desaparecerá de tu catálogo. Los presupuestos que ya has guardado no cambian.
+            </>
+          ) : deleteTarget ? (
+            deleteTarget.count > 0 ? (
+              <>
+                «{deleteTarget.phaseName}» y sus {deleteTarget.count} partida
+                {deleteTarget.count === 1 ? '' : 's'} se borran del catálogo. Los presupuestos ya guardados no cambian.
+              </>
+            ) : (
+              <>«{deleteTarget.phaseName}» no tiene ninguna partida: sólo se borra la sección.</>
+            )
+          ) : null
+        }
+        confirmLabel="Eliminar"
+        pendingLabel={deleteTarget?.kind === 'section' ? 'Eliminando la sección…' : 'Eliminando la partida…'}
+        pending={deleting}
+        error={deleteError}
+        onConfirm={runDelete}
+        onCancel={() => {
+          if (deleting) return
+          setDeleteTarget(null)
+          setDeleteError(null)
+        }}
+      />
 
       {showAdd && (
         <div className="mb-6 bg-white p-5 rounded-2xl border border-zinc-100 shadow-[0_4px_24px_rgba(0,0,0,0.02)] grid grid-cols-1 md:grid-cols-[1.3fr_1.3fr_0.6fr_0.7fr_auto] gap-3 items-end">
@@ -797,10 +902,10 @@ export default function CatalogPage() {
           </div>
           <button
             onClick={handleAddService}
-            disabled={busy}
+            disabled={busy || adding}
             className="h-[42px] inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-500 text-white px-5 rounded-lg font-bold text-sm transition active:scale-95 disabled:cursor-progress"
           >
-            {busy ? (
+            {adding ? (
               <ConstructionLoader variant="crane" size="sm" tone="invert" label="Añadiendo…" />
             ) : (
               'Añadir'
@@ -811,8 +916,22 @@ export default function CatalogPage() {
 
       <div className="bg-white p-6 rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 mb-8">
         <h3 className="font-bold text-zinc-800 mb-3 text-sm uppercase tracking-wider">Importar documento</h3>
+        {/* El trabajo se ve aquí, en la propia tarjeta: antes una capa blanca tapaba toda la
+            pantalla y el loader parecía vivir en el botón equivocado. */}
+        {busyLabel && (
+          <div className="mb-3 rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2.5">
+            <ConstructionLoader variant="crane" size="sm" label={busyLabel} />
+            <p className="mt-1 pl-[34px] text-[11px] font-medium leading-snug text-blue-900/70">
+              Se hace en el servidor: no cierres esta pestaña.
+            </p>
+          </div>
+        )}
         <div className="space-y-3">
-          <label className="border-2 border-dashed border-blue-200 bg-blue-50/50 hover:bg-blue-50 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition w-full">
+          <label
+            className={`border-2 border-dashed border-blue-200 bg-blue-50/50 hover:bg-blue-50 rounded-xl p-6 flex flex-col items-center justify-center transition w-full ${
+              busy ? 'opacity-60 cursor-progress' : 'cursor-pointer'
+            }`}
+          >
             <UploadCloud size={24} className="text-blue-600 mb-2" />
             <span className="font-bold text-blue-900 text-sm">
               {file ? file.name : 'Haz clic o arrastra tu presupuesto'}
@@ -822,19 +941,30 @@ export default function CatalogPage() {
               type="file"
               accept={DOCUMENT_ACCEPT}
               className="hidden"
+              disabled={busy}
               onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
             />
           </label>
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <label className="flex items-center gap-2 font-medium text-zinc-700">
-              <input type="radio" checked={importMode === 'merge'} onChange={() => setImportMode('merge')} />
+              <input
+                type="radio"
+                checked={importMode === 'merge'}
+                disabled={busy}
+                onChange={() => setImportMode('merge')}
+              />
               Añadir a lo que ya tengo
               <span className="text-[10px] font-black uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
                 recomendado
               </span>
             </label>
             <label className="flex items-center gap-2 font-medium text-zinc-700">
-              <input type="radio" checked={importMode === 'replace'} onChange={() => setImportMode('replace')} />
+              <input
+                type="radio"
+                checked={importMode === 'replace'}
+                disabled={busy}
+                onChange={() => setImportMode('replace')}
+              />
               Reemplazar todo mi catálogo
             </label>
             {importMode === 'merge' && (
@@ -1249,15 +1379,11 @@ export default function CatalogPage() {
           <button
             onClick={handleUpload}
             disabled={!file || !preview || busy}
-            className="w-full inline-flex items-center justify-center gap-2 bg-zinc-900 disabled:bg-zinc-500 hover:bg-black text-white px-6 py-3 rounded-xl font-bold transition active:scale-[0.99] disabled:cursor-progress"
+            className={`w-full inline-flex items-center justify-center gap-2 bg-zinc-900 disabled:bg-zinc-500 hover:bg-black text-white px-6 py-3 rounded-xl font-bold transition active:scale-[0.99] ${
+              busy ? 'cursor-progress' : 'disabled:cursor-not-allowed'
+            }`}
           >
-            {busy ? (
-              <ConstructionLoader variant="crane" size="sm" tone="invert" label="Procesando…" />
-            ) : preview ? (
-              'Confirmar importación'
-            ) : (
-              'Importar documento'
-            )}
+            {busy ? 'Procesando…' : preview ? 'Confirmar importación' : 'Importar documento'}
           </button>
           <p className="text-[11px] text-zinc-400 leading-snug">
             Se leen <strong>todas las hojas</strong> del archivo, no sólo la primera. El precio se busca por la cabecera
@@ -1333,7 +1459,7 @@ export default function CatalogPage() {
                     <span className="text-[11px] font-bold text-zinc-400">{list.length} partidas</span>
                     <button
                       type="button"
-                      onClick={() => handleDeleteSection(list[0].phase_id, phaseName, list.length)}
+                      onClick={() => askDeleteSection(list[0].phase_id, phaseName, list.length)}
                       className="p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
                       title="Eliminar la sección y sus partidas"
                     >
@@ -1422,7 +1548,7 @@ export default function CatalogPage() {
                         <span className="text-[11px] font-bold text-zinc-400">€</span>
                       </div>
                       <button
-                        onClick={() => handleDelete(service)}
+                        onClick={() => askDeleteService(service)}
                         className="justify-self-center p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
                         title="Eliminar del catálogo"
                       >

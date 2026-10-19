@@ -5,6 +5,7 @@ import { computeTotals } from '@/lib/estimate-totals';
 import { unconfirmedRows, PRICE_TO_CONFIRM } from '@/lib/pending-notes';
 import { X, Printer, Mail, Download, MessageCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import ConstructionLoader from '@/components/ConstructionLoader';
 
 const fmt = (n: number) => n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 
@@ -25,7 +26,12 @@ export default function EstimatePDFPreview({
   const [whatsappTo, setWhatsappTo] = useState('');
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [showWhatsappForm, setShowWhatsappForm] = useState(false);
-  const [busy, setBusy] = useState(false);
+  /**
+   * Qué salida del diálogo está preparando el PDF. De una en una: un `busy` compartido
+   * pintaba el loader en los dos botones a la vez, y el que no se había pulsado parecía
+   * estar trabajando por su cuenta.
+   */
+  const [busyAction, setBusyAction] = useState<'email' | 'whatsapp' | null>(null);
   const [generating, setGenerating] = useState(false);
   const [hint, setHint] = useState('');
   /**
@@ -167,8 +173,8 @@ export default function EstimatePDFPreview({
    * open the mail draft, telling the user to attach the just-downloaded file.
    */
   const handleSendEmail = async () => {
-    if (!emailTo || busy || !guardSend()) return;
-    setBusy(true);
+    if (!emailTo || busyAction !== null || !guardSend()) return;
+    setBusyAction('email');
     setHint('');
     try {
       const subject = `Presupuesto - ${estimate.client_name}`;
@@ -182,7 +188,7 @@ export default function EstimatePDFPreview({
       console.error('No se pudo preparar el correo:', err);
       setHint('No se pudo generar el PDF. Prueba con «Imprimir → Guardar como PDF».');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -195,8 +201,8 @@ export default function EstimatePDFPreview({
   const handleSendWhatsapp = async () => {
     // Checked before opening the blank tab: a blocked send must not leave a
     // stray window behind.
-    if (busy || !guardSend()) return;
-    setBusy(true);
+    if (busyAction !== null || !guardSend()) return;
+    setBusyAction('whatsapp');
     setHint('');
     const phone = whatsappTo.replace(/\D/g, '');
     const message = `Hola ${estimate.client_name}, le envío el presupuesto para ${estimate.property_address}. Importe total ${vatIncluded ? '(IVA incluido)' : '(sin IVA)'}: ${fmt(totals.total)}.`;
@@ -217,7 +223,7 @@ export default function EstimatePDFPreview({
       console.error('No se pudo preparar el WhatsApp:', err);
       setHint('No se pudo generar el PDF. Prueba con «Imprimir → Guardar como PDF».');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -243,9 +249,16 @@ export default function EstimatePDFPreview({
             <button
               onClick={handleDownloadPdf}
               disabled={generating}
-              className="flex items-center gap-2 bg-white border border-zinc-300 hover:bg-zinc-50 text-zinc-800 px-3 sm:px-4 py-2 rounded-lg font-bold transition text-sm disabled:opacity-50"
+              title="Descargar el PDF"
+              className="flex items-center gap-2 bg-white border border-zinc-300 hover:bg-zinc-50 text-zinc-800 px-3 sm:px-4 py-2 rounded-lg font-bold transition text-sm disabled:opacity-70 disabled:cursor-progress"
             >
-              <Download size={16} /> <span className="hidden sm:inline">{generating ? 'Generando…' : 'PDF'}</span>
+              {generating ? (
+                <ConstructionLoader variant="crane" size="sm" label="Generando…" />
+              ) : (
+                <>
+                  <Download size={16} /> <span className="hidden sm:inline">PDF</span>
+                </>
+              )}
             </button>
             <button
               onClick={handlePrint}
@@ -274,10 +287,18 @@ export default function EstimatePDFPreview({
               />
               <button
                 onClick={handleSendEmail}
-                disabled={!emailTo || busy}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold text-sm disabled:opacity-50"
+                disabled={!emailTo || busyAction !== null}
+                className={`flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold text-sm disabled:opacity-50 ${
+                  busyAction === 'email' ? 'cursor-progress' : 'disabled:cursor-not-allowed'
+                }`}
               >
-                {busy ? 'Generando…' : shareSupported ? 'Compartir por email' : 'Abrir correo con el PDF'}
+                {busyAction === 'email' ? (
+                  <ConstructionLoader variant="crane" size="sm" tone="invert" label="Preparando el PDF…" />
+                ) : shareSupported ? (
+                  'Compartir por email'
+                ) : (
+                  'Abrir correo con el PDF'
+                )}
               </button>
             </div>
             <p className="max-w-4xl mx-auto px-6 pb-2 text-[11px] font-medium text-zinc-500 leading-relaxed">
@@ -301,10 +322,18 @@ export default function EstimatePDFPreview({
               />
               <button
                 onClick={handleSendWhatsapp}
-                disabled={busy}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg font-bold text-sm disabled:opacity-50"
+                disabled={busyAction !== null}
+                className={`flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg font-bold text-sm disabled:opacity-50 ${
+                  busyAction === 'whatsapp' ? 'cursor-progress' : 'disabled:cursor-not-allowed'
+                }`}
               >
-                {busy ? 'Generando…' : shareSupported ? 'Compartir por WhatsApp' : 'Abrir WhatsApp con el PDF'}
+                {busyAction === 'whatsapp' ? (
+                  <ConstructionLoader variant="crane" size="sm" tone="invert" label="Preparando el PDF…" />
+                ) : shareSupported ? (
+                  'Compartir por WhatsApp'
+                ) : (
+                  'Abrir WhatsApp con el PDF'
+                )}
               </button>
             </div>
             <p className="max-w-4xl mx-auto px-6 pb-2 text-[11px] font-medium text-zinc-500 leading-relaxed">
