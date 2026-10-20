@@ -41,7 +41,7 @@ export default function LoginPage({
         <div className="mb-4">
           <Link
             href="/login/forgot-password"
-            className="text-sm text-blue-600 hover:text-blue-700 font-semibold transition"
+            className="text-sm text-blue-600 hover:text-blue-700 font-semibold transition inline-flex items-center min-h-[44px]"
           >
             ¿Olvidaste tu contraseña?
           </Link>

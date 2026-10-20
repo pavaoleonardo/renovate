@@ -73,7 +73,7 @@ export default async function RootLayout({
         {/* Global Nav MVP */}
         <nav className="bg-white border-b border-zinc-200 shadow-sm sticky top-0 z-40 pt-[env(safe-area-inset-top)]">
           <div className="w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
-            <Link href="/" className="font-extrabold text-xl tracking-tighter text-zinc-900 shrink-0">
+            <Link href="/" className="inline-flex items-center min-h-[44px] font-extrabold text-xl tracking-tighter text-zinc-900 shrink-0">
               RENOVATE<span className="text-blue-600">.</span>
             </Link>
             
@@ -91,7 +91,7 @@ export default async function RootLayout({
                 <Link
                   href="/clients"
                   title={company.name}
-                  className="flex items-center gap-2 min-w-0 hover:opacity-80 transition"
+                  className="flex items-center gap-2 min-w-0 min-h-[44px] hover:opacity-80 transition"
                 >
                   <CompanyBrand name={company.name} logoUrl={company.logo_url} />
                   <span className="hidden sm:inline truncate max-w-[9rem] lg:max-w-[12rem] text-sm lg:text-base font-extrabold tracking-tight text-zinc-900">
@@ -104,7 +104,7 @@ export default async function RootLayout({
                   <SubmitButton
                     pendingLabel="Saliendo…"
                     tone="light"
-                    className="text-xs font-bold text-zinc-500 hover:text-red-600 border border-zinc-200 bg-white px-3 py-1.5 rounded-lg shadow-sm transition whitespace-nowrap"
+                    className="inline-flex items-center justify-center min-h-[44px] text-xs font-bold text-zinc-500 hover:text-red-600 border border-zinc-200 bg-white px-3 py-1.5 rounded-lg shadow-sm transition whitespace-nowrap"
                   >
                     {/* The email only where there is room for it: the bar now also
                         carries the company's name. */}
@@ -113,7 +113,7 @@ export default async function RootLayout({
                   </SubmitButton>
                 </form>
               ) : (
-                <Link href="/login" className="text-sm font-bold bg-blue-50 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-100 transition shadow-sm">
+                <Link href="/login" className="inline-flex items-center min-h-[44px] text-sm font-bold bg-blue-50 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-100 transition shadow-sm">
                   Iniciar Sesión
                 </Link>
               )}
