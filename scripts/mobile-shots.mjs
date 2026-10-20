@@ -165,6 +165,8 @@ const SCREENS = [
   {
     name: '04-estimate',
     path: '/clients',
+    // The editor paints its rows client-side; measuring it early invents overflow.
+    settle: 3000,
     async prepare(page) {
       await page.locator('a[href^="/clients/"]').first().click();
       await page.waitForURL(/\/clients\/[^/]+$/);
@@ -207,22 +209,29 @@ const main = async () => {
   if (!PUBLIC_ONLY) {
     await page.fill('input[name="email"]', email);
     await page.fill('input[name="password"]', password);
-    await Promise.all([
-      page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 20000 }),
-      page.click('button[type="submit"]'),
-    ]).catch(async () => {
-      const alert = await page
-        .locator('[role="alert"], .text-red-600, .text-red-700')
-        .first()
-        .textContent()
-        .catch(() => null);
-      console.error(
-        `Login did not leave /login.${alert ? ` The page said: ${alert.trim().slice(0, 120)}` : ''}`,
-      );
+    await page.click('button[type="submit"]');
+    // `login()` reports a refusal by redirecting to /login?message=… (see actions.ts),
+    // so "still on /login" is a failure *with an explanation in the query string*.
+    await page
+      .waitForFunction(
+        () =>
+          !location.pathname.startsWith('/login') ||
+          new URLSearchParams(location.search).has('message'),
+        null,
+        { timeout: 25000 },
+      )
+      .catch(() => {});
+    const after = new URL(page.url());
+    if (after.pathname.startsWith('/login')) {
+      const said = after.searchParams.get('message');
+      console.error(`Login rejected${said ? `: ${said.slice(0, 160)}` : ' (no message returned)'}.`);
+      // Supabase answers "invalid credentials" both for a wrong password *and* for an
+      // address that never signed up, so point at the two checks worth making first.
+      console.error('  Check: does that address exist in this Supabase project, and is its email confirmed?');
       console.error('The credentials were read from .env.e2e.local and were not printed.');
       await browser.close();
       process.exit(3);
-    });
+    }
   }
 
   for (const screen of SCREENS) {
@@ -230,8 +239,10 @@ const main = async () => {
     if (ONLY && !screen.name.includes(ONLY)) continue;
 
     await page.goto(`${BASE}${screen.path}`, { waitUntil: 'domcontentloaded' });
-    // The editor fetches its rows client-side; give it a beat to paint.
-    await page.waitForTimeout(1200);
+    // The editor fetches its rows client-side; give it a beat to paint. `networkidle`
+    // is the honest signal, the timer is only there for pages that poll forever.
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(screen.settle ?? 1200);
 
     if (screen.prepare) {
       const moved = await screen.prepare(page).catch(() => false);
@@ -239,7 +250,8 @@ const main = async () => {
         report.push({ name: screen.name, skipped: 'no link to open' });
         continue;
       }
-      await page.waitForTimeout(1200);
+      await page.waitForLoadState('networkidle').catch(() => {});
+      await page.waitForTimeout(screen.settle ?? 1200);
     }
 
     const metrics = await page.evaluate(measure);
