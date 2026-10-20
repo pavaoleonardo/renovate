@@ -9,10 +9,12 @@ import { computeTotals, normalizeTaxRate, taxHint, taxLabel, TAX_RATE_OPTIONS } 
 import { catalogKey } from '@/lib/catalog-key';
 import EstimatePDFPreview from './EstimatePDFPreview';
 import AutoGrowTextarea from './AutoGrowTextarea';
+import DecimalInput from './DecimalInput';
 import PendingNotesPanel from './PendingNotesPanel';
 import ConstructionLoader from './ConstructionLoader';
 import VoiceChangeCapture from './VoiceChangeCapture';
 import { pendingToRow } from '@/lib/pending-notes';
+import { moveItem } from '@/lib/reorder';
 import { applyVoiceOps } from '@/lib/voice-change';
 import type { VoiceOutlineSection, VoiceCatalogEntry } from '@/lib/voice-change';
 
@@ -232,6 +234,16 @@ export default function EstimateEditor({
 
   const removeRow = (id: string) => {
     setRows(rows.filter(r => r.id !== id));
+  };
+
+  /**
+   * The arrows a phone can press. Drag & drop stays the desktop way of moving a
+   * line, but HTML5 drag cannot be started with a finger and the grip is hidden on
+   * a narrow screen, so the same move needs a button there. The ends are disabled,
+   * and `moveItem` refuses them too, so the button and the function cannot disagree.
+   */
+  const moveRowBy = (index: number, delta: number) => {
+    setRows(moveItem(rows, index, index + delta));
   };
 
   const applyService = (id: string, serviceId: string) => {
@@ -656,9 +668,13 @@ export default function EstimateEditor({
                     onDragOver={(e) => handleDragOver(rowIndex, e)}
                     onDrop={(e) => handleDrop(rowIndex, e)}
                     onDragEnd={handleDragEnd}
-                    className={`grid grid-cols-[24px_1fr_auto] md:grid-cols-[30px_1fr_auto] gap-2 md:gap-3 p-3 md:p-2 bg-blue-50/40 hover:bg-blue-50/80 items-center group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
+                    className={`grid grid-cols-[1fr_auto] md:grid-cols-[30px_1fr_auto] gap-2 md:gap-3 p-3 md:p-2 bg-blue-50/40 hover:bg-blue-50/80 items-center group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
                   >
-                    <div className="text-center cursor-grab active:cursor-grabbing text-zinc-300 hover:text-blue-500"><GripVertical size={18}/></div>
+                    {/* The grip is a mouse affordance: HTML5 drag cannot be started by a
+                        finger, so on a phone it is not rendered instead of sitting there
+                        doing nothing. Moving a whole section — its lines follow the
+                        header — is still to come. */}
+                    <div className="hidden md:flex text-center cursor-grab active:cursor-grabbing text-zinc-300 hover:text-blue-500"><GripVertical size={18}/></div>
                     <input 
                       className="font-extrabold text-xl text-blue-900 bg-transparent border-none focus:ring-2 focus:ring-blue-200 rounded-md px-2 py-1 placeholder:text-blue-300 w-full transition"
                       value={row.phase_name_snapshot || ''}
@@ -734,13 +750,17 @@ export default function EstimateEditor({
                     </div>
                     <div className="flex flex-col gap-1">
                     <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-right">Precio</label>
-                    <div className="relative">
+                      <div className="relative">
                       <span className="absolute left-2 top-1.5 text-zinc-400 text-sm">€</span>
-                      <input 
-                        type="number"
-                        className="w-full text-right bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-md pl-5 pr-2 py-1.5 text-sm font-medium tabular-nums transition"
-                        value={row.price_snapshot || ''}
-                        onChange={(e) => updateRow(row.id, { price_snapshot: parseFloat(e.target.value) || 0 })}
+                      {/* A plain text field with a decimal keypad: `type="number"` throws
+                          away the comma a Spanish keyboard offers, and «12,50» silently
+                          became 1250. The same reader as the catalogue and the importer
+                          (parsePriceInput) turns what was typed into the number. */}
+                      <DecimalInput
+                        className="w-full text-right bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-md pl-5 pr-2 py-1.5 text-sm font-medium tabular-nums transition outline-none"
+                        value={row.price_snapshot}
+                        onValueChange={(value) => updateRow(row.id, { price_snapshot: value })}
+                        ariaLabel={`Precio de ${row.service_name_snapshot || 'la línea'}`}
                       />
                     </div>
                     </div>
@@ -750,20 +770,22 @@ export default function EstimateEditor({
                       <button
                         type="button"
                         onClick={() => updateRow(row.id, { quantity: Math.max(0, (row.quantity || 0) - 1) })}
-                        className="p-0.5 rounded hover:bg-blue-100 text-zinc-400 hover:text-blue-600 transition"
+                        aria-label="Restar una unidad"
+                        className="p-2 md:p-0.5 rounded hover:bg-blue-100 text-zinc-400 hover:text-blue-600 transition"
                       >
                         <ChevronDown size={14} />
                       </button>
-                      <input 
-                        type="number"
-                        className="w-12 text-center font-bold text-blue-700 bg-transparent border border-transparent hover:border-blue-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-md px-1 py-1.5 text-sm transition"
-                        value={row.quantity || ''}
-                        onChange={(e) => updateRow(row.id, { quantity: parseFloat(e.target.value) || 0 })}
+                      <DecimalInput
+                        className="w-12 text-center font-bold text-blue-700 bg-transparent border border-transparent hover:border-blue-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-md px-1 py-1.5 text-sm transition outline-none"
+                        value={row.quantity}
+                        onValueChange={(value) => updateRow(row.id, { quantity: value })}
+                        ariaLabel="Cantidad"
                       />
                       <button
                         type="button"
                         onClick={() => updateRow(row.id, { quantity: (row.quantity || 0) + 1 })}
-                        className="p-0.5 rounded hover:bg-blue-100 text-zinc-400 hover:text-blue-600 transition"
+                        aria-label="Sumar una unidad"
+                        className="p-2 md:p-0.5 rounded hover:bg-blue-100 text-zinc-400 hover:text-blue-600 transition"
                       >
                         <ChevronUp size={14} />
                       </button>
@@ -775,7 +797,42 @@ export default function EstimateEditor({
                       {calcRowTotal(row).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                     </div>
                     </div>
-                    <button onClick={() => removeRow(row.id)} className="text-zinc-300 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition flex justify-center items-center"><Trash2 size={16} /></button>
+                    {/* One cell in both layouts: the delete button, plus — only where a
+                        finger does the work — the arrows that move this line up or down.
+                        The grip is hidden on a phone, so this strip is the whole
+                        reordering affordance there, and every target is thumb-sized. */}
+                    <div className="col-span-2 md:col-span-1 flex items-center justify-between md:justify-center">
+                      <div className="flex md:hidden items-center">
+                        <button
+                          type="button"
+                          onClick={() => moveRowBy(rowIndex, -1)}
+                          disabled={rowIndex === 0}
+                          aria-label="Subir esta línea"
+                          title="Subir esta línea"
+                          className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition disabled:opacity-25 disabled:hover:bg-transparent"
+                        >
+                          <ChevronUp size={18} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveRowBy(rowIndex, 1)}
+                          disabled={rowIndex === rows.length - 1}
+                          aria-label="Bajar esta línea"
+                          title="Bajar esta línea"
+                          className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition disabled:opacity-25 disabled:hover:bg-transparent"
+                        >
+                          <ChevronDown size={18} />
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => removeRow(row.id)}
+                        aria-label="Eliminar esta línea"
+                        title="Eliminar esta línea"
+                        className="flex h-11 w-11 md:h-auto md:w-auto items-center justify-center rounded-lg md:rounded-none text-zinc-300 hover:text-red-500 hover:bg-red-50 md:hover:bg-transparent transition md:opacity-0 md:group-hover:opacity-100"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                     {/* 9th cell: the client note, a full-width row of its own (md). It grows with
                         the text, so a long AI-generated paragraph is readable without clipping. */}
                     <div className="col-span-2 md:col-span-full md:pl-[42px]">
@@ -837,7 +894,7 @@ export default function EstimateEditor({
         </div>
 
         {/* STICKY ACTION BAR */}
-        <div className="fixed bottom-4 md:bottom-6 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-shell bg-white border border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-3 px-4 md:p-4 md:px-8 flex flex-col md:flex-row md:justify-between md:items-center gap-3 rounded-2xl z-50 print:hidden">
+        <div className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] md:bottom-[calc(1.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-shell bg-white border border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-3 px-4 md:p-4 md:px-8 flex flex-col md:flex-row md:justify-between md:items-center gap-3 rounded-2xl z-50 print:hidden">
           <div className="w-full md:w-auto flex flex-col gap-1.5">
             <button 
               onClick={handleSave} 

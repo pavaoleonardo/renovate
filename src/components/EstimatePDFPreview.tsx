@@ -350,7 +350,7 @@ export default function EstimatePDFPreview({
           while a price is missing. Hidden when printing so it never lands on
           paper, and it never blocks editing or closing the preview. */}
       {!canSend && (
-        <div className="fixed bottom-0 left-0 right-0 z-[120] bg-amber-500 text-white shadow-lg print:hidden">
+        <div className="fixed bottom-0 left-0 right-0 z-[120] bg-amber-500 text-white shadow-lg pb-[env(safe-area-inset-bottom)] print:hidden">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 py-2.5">
             <p className="text-xs sm:text-sm font-black">
               {guardMessage} No se puede enviar todavía.

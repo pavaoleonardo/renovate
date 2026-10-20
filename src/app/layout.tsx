@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import Link from 'next/link';
@@ -19,6 +19,20 @@ export const metadata: Metadata = {
   other: {
     'build-commit': process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local',
   },
+};
+
+/**
+ * Phones get the whole screen, notch included, and the app pays it back with
+ * `env(safe-area-inset-*)`: the nav pads its top so the wordmark never sits under
+ * a camera cutout, and the editor's action bar and the PDF banner pad their bottom
+ * so a button is never behind the home indicator. `themeColor` paints the browser
+ * bar in the app's blue instead of a grey guess.
+ */
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#2563eb',
 };
 
 export default async function RootLayout({
@@ -57,7 +71,7 @@ export default async function RootLayout({
         <AuthSessionHandler />
 
         {/* Global Nav MVP */}
-        <nav className="bg-white border-b border-zinc-200 shadow-sm sticky top-0 z-40">
+        <nav className="bg-white border-b border-zinc-200 shadow-sm sticky top-0 z-40 pt-[env(safe-area-inset-top)]">
           <div className="w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
             <Link href="/" className="font-extrabold text-xl tracking-tighter text-zinc-900 shrink-0">
               RENOVATE<span className="text-blue-600">.</span>

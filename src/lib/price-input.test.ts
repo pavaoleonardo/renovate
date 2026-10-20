@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePriceInput } from '@/lib/price-input'
+import { formatPriceInput, parsePriceInput } from '@/lib/price-input'
 
 /**
  * Reading prices a person typed by hand. The value here is the `null`: callers keep the
@@ -42,3 +42,33 @@ describe('parsePriceInput', () => {
     expect(parsePriceInput(Number.POSITIVE_INFINITY)).toBeNull()
   })
 })
+
+/**
+ * The other direction: what the field shows for a stored price. A comma, because
+ * that is how it is typed here, and an empty field for zero — a 0 in an estimate
+ * means «pendiente», not «gratis».
+ */
+describe('formatPriceInput', () => {
+  it('escribe los decimales con coma, como se teclean aquí', () => {
+    expect(formatPriceInput(18.82)).toBe('18,82')
+    expect(formatPriceInput(0.5)).toBe('0,5')
+    expect(formatPriceInput(1234.56)).toBe('1234,56')
+  })
+
+  it('un número entero se queda sin decimales', () => {
+    expect(formatPriceInput(1200)).toBe('1200')
+    expect(formatPriceInput(1)).toBe('1')
+  })
+
+  it('no deja ver la basura del coma flotante', () => {
+    expect(formatPriceInput(0.1 + 0.2)).toBe('0,3')
+  })
+
+  it('cero y vacío se leen como «sin precio todavía»', () => {
+    expect(formatPriceInput(0)).toBe('')
+    expect(formatPriceInput(null)).toBe('')
+    expect(formatPriceInput(undefined)).toBe('')
+    expect(formatPriceInput(Number.NaN)).toBe('')
+  })
+})
+

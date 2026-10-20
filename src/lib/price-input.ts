@@ -48,3 +48,20 @@ export function parsePriceInput(raw: unknown): number | null {
   const value = Number(text)
   return Number.isFinite(value) ? value : null
 }
+
+/**
+ * The text a price field shows for a stored number: a comma for the decimals, the
+ * way a price is written here («18,82»), and nothing at all for 0 or for a value
+ * that was never set — a zero price in an estimate means «not priced yet», so the
+ * field must read empty instead of claiming the work is free.
+ *
+ * Rounded to four decimals first: a total that went through a multiplication can
+ * arrive as 0.30000000000000004, and that must not end up in an input.
+ */
+export function formatPriceInput(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return ''
+  const rounded = Number(value.toFixed(4))
+  if (rounded === 0) return ''
+  return String(rounded).replace('.', ',')
+}
+

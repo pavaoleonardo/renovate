@@ -18,6 +18,28 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
+/* ---------------------------------------------------------------------------
+   Phones: a field smaller than 16px makes Safari zoom.
+
+   Safari on iOS zooms the whole page as soon as a focused field renders below
+   16px, and it never zooms back out — so every tap on a price in an estimate
+   threw the layout off, and the app felt broken rather than small. The editor
+   wrote its fields at 14px and 12px to fit six columns on a desktop screen.
+
+   One rule beats thirty edits: on a narrow screen every text field, select and
+   textarea is 16px, whatever Tailwind class it carries. `!important` is
+   deliberate — it has to win over the utility class on each field, and it is the
+   whole point of the rule. Checkboxes and radios are left alone (they are sized
+   by their box, not their font), and nothing above 767px changes.
+--------------------------------------------------------------------------- */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
 /* Base custom classes to maintain a very clean aesthetic */
 ::selection {
   background-color: #dbeafe;

@@ -20,6 +20,7 @@ import { hasMarketBand } from '@/lib/market-band'
 import { AlertCircle, CheckCircle2, Box, Download, Plus, RefreshCw, Search, Sparkles, Trash2, UploadCloud, X } from 'lucide-react'
 import ConstructionLoader from '@/components/ConstructionLoader'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import NameDialog from '@/components/NameDialog'
 import { CatalogService, ExcelPreview, ExcelPreviewMatch } from '@/types'
 
 const UNITS = ['m2', 'ml', 'm3', 'ud', 'kg', 'h', 'vg']
@@ -41,8 +42,11 @@ const searchKey = (value: string) =>
  * market column only exists while a section has prices bands to show.
  */
 const PARTIDA_COLUMNS = 'grid items-center gap-2 md:gap-3'
-const PARTIDA_COLUMNS_BASE = `${PARTIDA_COLUMNS} grid-cols-[1fr_48px_96px_28px] md:grid-cols-[1fr_64px_112px_32px]`
-const PARTIDA_COLUMNS_MARKET = `${PARTIDA_COLUMNS} grid-cols-[1fr_48px_96px_28px] md:grid-cols-[1fr_64px_112px_32px_170px]`
+// The last column is the delete button: 40px on a phone, because 28px was a target
+// only a mouse could hit. The price column keeps room for «1.234,56» at 16px, which
+// is the size every field has on a narrow screen (see globals.css).
+const PARTIDA_COLUMNS_BASE = `${PARTIDA_COLUMNS} grid-cols-[1fr_44px_96px_40px] md:grid-cols-[1fr_64px_112px_32px]`
+const PARTIDA_COLUMNS_MARKET = `${PARTIDA_COLUMNS} grid-cols-[1fr_44px_96px_40px] md:grid-cols-[1fr_64px_112px_32px_170px]`
 
 /**
  * Where the price of a partida comes from: the short basis tag, what drives its
@@ -190,6 +194,10 @@ export default function CatalogPage() {
   >(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  /** La nueva sección se pide en un diálogo de la app, no en el `window.prompt` del navegador. */
+  const [phaseDialogOpen, setPhaseDialogOpen] = useState(false)
+  const [creatingPhase, setCreatingPhase] = useState(false)
+  const [phaseError, setPhaseError] = useState<string | null>(null)
   /** Añadir una partida a mano: su botón lleva el loader, y sólo él. */
   const [adding, setAdding] = useState(false)
   const [newService, setNewService] = useState({ phaseId: '', name: '', unit: 'ud', price: '' })
@@ -569,16 +577,29 @@ export default function CatalogPage() {
     }
   }
 
-  const handleCreatePhase = async () => {
-    const name = window.prompt('Nombre de la nueva sección (ej. «Extras y varios»)')
-    if (!name) return
-    setBusy(true)
+  /**
+   * The name is asked in the app's own dialog (`NameDialog`), not with
+   * `window.prompt`: on a phone that prompt is a desktop-sized grey box, and after
+   * it closes there is no way to know whether the section was created. The dialog
+   * stays open with the reason if the request fails, and its button carries the
+   * loader while it runs.
+   */
+  const handleCreatePhase = async (name: string) => {
+    setCreatingPhase(true)
+    setPhaseError(null)
     try {
       const res = await createCatalogPhase(name)
-      if (res.success && res.phase) setNewService((prev) => ({ ...prev, phaseId: res.phase!.id }))
+      if (!res.success) {
+        setPhaseError(res.error || 'No se pudo crear la sección.')
+        return
+      }
+      if (res.phase) setNewService((prev) => ({ ...prev, phaseId: res.phase!.id }))
+      setPhaseDialogOpen(false)
       await fetchCatalog()
+    } catch {
+      setPhaseError('No se pudo crear la sección. Revisa la conexión e inténtalo otra vez.')
     } finally {
-      setBusy(false)
+      setCreatingPhase(false)
     }
   }
 
@@ -690,7 +711,7 @@ export default function CatalogPage() {
             <Plus size={16} /> Añadir partida
           </button>
           <button
-            onClick={handleCreatePhase}
+            onClick={() => setPhaseDialogOpen(true)}
             disabled={busy}
             className="flex items-center gap-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 px-4 py-2.5 rounded-xl font-bold text-sm transition active:scale-95"
           >
@@ -816,6 +837,26 @@ export default function CatalogPage() {
           </div>
         </div>
       )}
+
+      {/* Nombrar la sección nueva: un cuadro de la app, no el prompt del navegador. Si
+          falla, el motivo y el nombre escrito se quedan aquí. */}
+      <NameDialog
+        open={phaseDialogOpen}
+        title="Nueva sección"
+        description="Agrupa las partidas por oficio: «Albañilería», «Electricidad», «Extras y varios»."
+        label="Nombre de la sección"
+        placeholder="Extras y varios"
+        confirmLabel="Crear sección"
+        pendingLabel="Creando la sección…"
+        pending={creatingPhase}
+        error={phaseError}
+        onSubmit={handleCreatePhase}
+        onCancel={() => {
+          if (creatingPhase) return
+          setPhaseDialogOpen(false)
+          setPhaseError(null)
+        }}
+      />
 
       {/* La confirmación de borrado, con el loader dentro: se ve que el borrado está en
           marcha sin cerrar la pregunta ni tapar el catálogo. Si falla, el motivo se queda
@@ -1403,7 +1444,7 @@ export default function CatalogPage() {
           onClick={fetchCatalog}
           disabled={loading}
           aria-busy={loading}
-          className="p-2 text-zinc-400 hover:text-zinc-900 transition hover:bg-zinc-100 rounded-full disabled:cursor-progress disabled:text-zinc-300 disabled:hover:bg-transparent"
+          className="inline-flex h-10 w-10 md:h-auto md:w-auto items-center justify-center p-2 text-zinc-400 hover:text-zinc-900 transition hover:bg-zinc-100 rounded-full disabled:cursor-progress disabled:text-zinc-300 disabled:hover:bg-transparent"
           title="Actualizar catálogo"
         >
           {loading ? <ConstructionLoader size="sm" /> : <RefreshCw size={18} />}
@@ -1462,7 +1503,7 @@ export default function CatalogPage() {
                     <button
                       type="button"
                       onClick={() => askDeleteSection(list[0].phase_id, phaseName, list.length)}
-                      className="p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
+                      className="flex h-9 w-9 md:h-auto md:w-auto items-center justify-center p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
                       title="Eliminar la sección y sus partidas"
                     >
                       <Trash2 size={15} />
@@ -1551,7 +1592,7 @@ export default function CatalogPage() {
                       </div>
                       <button
                         onClick={() => askDeleteService(service)}
-                        className="justify-self-center p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
+                        className="justify-self-center flex h-10 w-10 md:h-auto md:w-auto items-center justify-center p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
                         title="Eliminar del catálogo"
                       >
                         <Trash2 size={16} />

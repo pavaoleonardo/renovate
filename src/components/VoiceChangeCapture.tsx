@@ -7,6 +7,7 @@ import type { VoiceOutlineSection, VoiceCatalogEntry } from '@/lib/voice-change'
 import { catalogKey } from '@/lib/catalog-key';
 import { appendTranscript } from '@/lib/speech';
 import VoiceButton from './VoiceButton';
+import DecimalInput from './DecimalInput';
 
 /** Cómo se llama cada operación en la revisión del cambio. */
 const OP_LABELS: Record<VoiceProposalLine['op'], string> = {
@@ -227,12 +228,10 @@ export default function VoiceChangeCapture({
                         )}
 
                         {!isRemove && (
-                          <input
-                            type="number"
-                            min={0}
-                            step="0.01"
+                          <DecimalInput
                             value={line.quantity}
-                            onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
+                            onValueChange={(value) => updateLine(i, { quantity: value })}
+                            ariaLabel="Cantidad"
                             className="w-16 px-2 py-1.5 rounded-md border border-zinc-200 text-sm text-zinc-800 text-right tabular-nums"
                           />
                         )}
