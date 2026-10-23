@@ -41,12 +41,16 @@ const searchKey = (value: string) =>
  * partida comes from the default catalog or from an imported document. The
  * market column only exists while a section has prices bands to show.
  */
-const PARTIDA_COLUMNS = 'grid items-center gap-2 md:gap-3'
-// The last column is the delete button: 40px on a phone, because 28px was a target
-// only a mouse could hit. The price column keeps room for «1.234,56» at 16px, which
-// is the size every field has on a narrow screen (see globals.css).
-const PARTIDA_COLUMNS_BASE = `${PARTIDA_COLUMNS} grid-cols-[1fr_44px_96px_40px] md:grid-cols-[1fr_64px_112px_32px]`
-const PARTIDA_COLUMNS_MARKET = `${PARTIDA_COLUMNS} grid-cols-[1fr_44px_96px_40px] md:grid-cols-[1fr_64px_112px_32px_170px]`
+const PARTIDA_COLUMNS = 'grid items-end gap-2 md:items-center md:gap-3'
+// The phone is the device this catalogue is actually edited on, so it gets its own
+// layout instead of a squeezed table: the description owns the whole first row and
+// unit, price and delete sit on a second one. (The old 4-column grid left the name
+// ~76px wide at 320px, so every partida wrapped one word per line — a 29.000px page.)
+// From `md` up the cells line up as the table they were designed as, with 40px for
+// the delete button because 28px was a target only a mouse could hit, and room in the
+// price column for «1.234,56» at 16px — the size every field has on a narrow screen.
+const PARTIDA_COLUMNS_BASE = `${PARTIDA_COLUMNS} grid-cols-[minmax(0,1fr)_auto_auto] md:grid-cols-[1fr_64px_112px_32px]`
+const PARTIDA_COLUMNS_MARKET = `${PARTIDA_COLUMNS} grid-cols-[minmax(0,1fr)_auto_auto] md:grid-cols-[1fr_64px_112px_32px_170px]`
 
 /**
  * Where the price of a partida comes from: the short basis tag, what drives its
@@ -1503,7 +1507,7 @@ export default function CatalogPage() {
                     <button
                       type="button"
                       onClick={() => askDeleteSection(list[0].phase_id, phaseName, list.length)}
-                      className="flex h-9 w-9 md:h-auto md:w-auto items-center justify-center p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
+                      className="flex h-10 w-10 md:h-auto md:w-auto items-center justify-center p-1.5 text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded transition"
                       title="Eliminar la sección y sus partidas"
                     >
                       <Trash2 size={15} />
@@ -1512,7 +1516,7 @@ export default function CatalogPage() {
                 </div>
                 {/* Column header: same grid as the rows below, so every column lines up. */}
                 <div
-                  className={`px-5 py-2 border-b border-zinc-100 text-[10px] font-black uppercase tracking-wide text-zinc-400 ${columns}`}
+                  className={`hidden md:grid px-5 py-2 border-b border-zinc-100 text-[10px] font-black uppercase tracking-wide text-zinc-400 ${columns}`}
                 >
                   <span className="pl-1.5">Descripción</span>
                   <span className="text-center">Ud</span>
@@ -1526,7 +1530,7 @@ export default function CatalogPage() {
                       key={service.id}
                       className={`px-5 py-3 hover:bg-zinc-50/60 transition ${columns}`}
                     >
-                      <div className="min-w-0">
+                      <div className="min-w-0 col-span-3 md:col-span-1">
                         <div className="flex items-center gap-2">
                           {service.code && (
                             <span className="text-[10px] font-black text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded">
@@ -1535,6 +1539,7 @@ export default function CatalogPage() {
                           )}
                           <input
                             defaultValue={service.name}
+                            title={service.name}
                             onBlur={(e) =>
                               e.target.value !== service.name && handleUpdate(service.id, { name: e.target.value })
                             }
@@ -1551,13 +1556,13 @@ export default function CatalogPage() {
                         onBlur={(e) =>
                           e.target.value !== service.unit && handleUpdate(service.id, { unit: e.target.value })
                         }
-                        className="w-full text-xs font-bold text-zinc-500 uppercase bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 rounded px-1.5 py-1 text-center transition"
+                        className="w-14 md:w-full justify-self-start text-xs font-bold text-zinc-500 uppercase bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 rounded px-1.5 py-1 text-center transition"
                       />
                       {/* Editable number plus its currency: the field keeps a visible box, so
                           the price never reads as plain text. Any number saves — the band in
                           «Mercado» is a reference, not a limit — and the dot says whether the
                           figure you set falls inside it. */}
-                      <div className="flex items-center justify-end gap-1.5 bg-zinc-50 border border-zinc-200 hover:border-zinc-300 focus-within:bg-white focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 rounded px-1.5 py-1 transition">
+                      <div className="w-32 md:w-auto justify-self-end flex items-center justify-end gap-1.5 bg-zinc-50 border border-zinc-200 hover:border-zinc-300 focus-within:bg-white focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 rounded px-1.5 py-1 transition">
                         <input
                           defaultValue={service.base_price}
                           inputMode="decimal"

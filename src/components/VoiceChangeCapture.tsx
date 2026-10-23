@@ -148,7 +148,7 @@ export default function VoiceChangeCapture({
           type="button"
           onClick={analyze}
           disabled={analyzing || !text.trim()}
-          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg font-bold text-sm transition disabled:opacity-50 active:scale-95"
+          className="flex items-center gap-1.5 min-h-[44px] bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg font-bold text-sm transition disabled:opacity-50 active:scale-95"
         >
           <Sparkles size={15} /> {analyzing ? 'Analizando…' : 'Analizar con IA'}
         </button>
@@ -156,7 +156,7 @@ export default function VoiceChangeCapture({
           type="button"
           onClick={saveAsNote}
           disabled={busy || !(summary || text).trim()}
-          className="flex items-center gap-1.5 bg-white border border-zinc-200 text-zinc-700 hover:text-zinc-900 hover:border-zinc-300 px-3 py-2 rounded-lg font-bold text-sm transition disabled:opacity-50 active:scale-95"
+          className="flex items-center gap-1.5 min-h-[44px] bg-white border border-zinc-200 text-zinc-700 hover:text-zinc-900 hover:border-zinc-300 px-3 py-2 rounded-lg font-bold text-sm transition disabled:opacity-50 active:scale-95"
         >
           <Save size={15} /> Guardar como cambio
         </button>

@@ -468,7 +468,7 @@ export default function EstimateEditor({
                 disabled={clientBusy}
                 title="Cliente al que pertenece esta obra"
                 aria-label="Cliente de la obra"
-                className="text-xs font-bold text-zinc-600 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-lg py-1.5 pl-2 pr-7 transition cursor-pointer disabled:opacity-50 max-w-[240px]"
+                className="text-xs font-bold text-zinc-600 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-lg py-1.5 pl-2 pr-7 min-h-[44px] md:min-h-0 transition cursor-pointer disabled:opacity-50 max-w-[240px]"
               >
                 <option value="" disabled>
                   {clients.length === 0 ? 'No hay clientes todavía' : 'Elegir cliente…'}
@@ -480,7 +480,7 @@ export default function EstimateEditor({
               <button
                 type="button"
                 onClick={() => setShowNewClient(v => !v)}
-                className="text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1.5 rounded-lg transition whitespace-nowrap"
+                className="inline-flex items-center min-h-[44px] md:min-h-0 text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1.5 rounded-lg transition whitespace-nowrap"
               >
                 + Nuevo cliente
               </button>
@@ -580,7 +580,7 @@ export default function EstimateEditor({
             
             <button 
               onClick={() => setShowPreview(true)}
-              className="flex items-center gap-2 text-zinc-600 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 px-4 py-2 rounded-lg transition font-semibold text-sm w-full md:w-auto justify-center"
+              className="flex items-center justify-center gap-2 min-h-[44px] md:min-h-0 text-zinc-600 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 px-4 py-2 rounded-lg transition font-semibold text-sm w-full md:w-auto"
             >
               <Printer size={18} /> Exportar PDF
             </button>
@@ -686,11 +686,17 @@ export default function EstimateEditor({
                         type="button"
                         onClick={() => addServiceRow(rowIndex)}
                         title="Añadir una línea a esta sección"
-                        className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-100 px-2 py-1 rounded-md transition md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
+                        className="flex items-center gap-1 min-h-[44px] md:min-h-0 text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-100 px-3 md:px-2 py-1 rounded-md transition md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
                       >
                         <Plus size={14} /> Línea
                       </button>
-                      <button onClick={() => removeRow(row.id)} className="p-1 text-zinc-300 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100 transition"><Trash2 size={16} /></button>
+                      <button
+                        onClick={() => removeRow(row.id)}
+                        aria-label="Eliminar la sección"
+                        className="flex h-10 w-10 md:h-auto md:w-auto items-center justify-center rounded text-zinc-300 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100 transition"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   </div>
                 );
@@ -704,7 +710,7 @@ export default function EstimateEditor({
                   onDragOver={(e) => handleDragOver(rowIndex, e)}
                   onDrop={(e) => handleDrop(rowIndex, e)}
                   onDragEnd={handleDragEnd}
-                  className={`grid grid-cols-2 md:grid-cols-[30px_1fr_60px_100px_80px_100px_30px] gap-3 p-4 md:p-2 md:items-center border-b border-zinc-100 md:border-0 hover:bg-zinc-50/80 group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
+                  className={`grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] md:grid-cols-[30px_1fr_60px_100px_80px_100px_30px] gap-3 p-4 md:p-2 md:items-center border-b border-zinc-100 md:border-0 hover:bg-zinc-50/80 group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
                 >
                    <div className="hidden md:flex text-center cursor-grab active:cursor-grabbing text-zinc-200 hover:text-zinc-400 justify-center"><GripVertical size={16}/></div>
                    <div className="col-span-2 md:col-span-1 flex flex-col gap-1">
@@ -751,13 +757,13 @@ export default function EstimateEditor({
                     <div className="flex flex-col gap-1">
                     <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-right">Precio</label>
                       <div className="relative">
-                      <span className="absolute left-2 top-1.5 text-zinc-400 text-sm">€</span>
+                      <span className="absolute right-2 top-1.5 text-zinc-400 text-sm pointer-events-none">€</span>
                       {/* A plain text field with a decimal keypad: `type="number"` throws
                           away the comma a Spanish keyboard offers, and «12,50» silently
                           became 1250. The same reader as the catalogue and the importer
                           (parsePriceInput) turns what was typed into the number. */}
                       <DecimalInput
-                        className="w-full text-right bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-md pl-5 pr-2 py-1.5 text-sm font-medium tabular-nums transition outline-none"
+                        className="w-full text-right bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-md pl-2 pr-6 py-1.5 text-sm font-medium tabular-nums transition outline-none"
                         value={row.price_snapshot}
                         onValueChange={(value) => updateRow(row.id, { price_snapshot: value })}
                         ariaLabel={`Precio de ${row.service_name_snapshot || 'la línea'}`}
@@ -771,7 +777,7 @@ export default function EstimateEditor({
                         type="button"
                         onClick={() => updateRow(row.id, { quantity: Math.max(0, (row.quantity || 0) - 1) })}
                         aria-label="Restar una unidad"
-                        className="p-2 md:p-0.5 rounded hover:bg-blue-100 text-zinc-400 hover:text-blue-600 transition"
+                        className="flex h-10 w-10 shrink-0 md:h-auto md:w-auto items-center justify-center md:p-0.5 rounded hover:bg-blue-100 text-zinc-400 hover:text-blue-600 transition"
                       >
                         <ChevronDown size={14} />
                       </button>
@@ -785,7 +791,7 @@ export default function EstimateEditor({
                         type="button"
                         onClick={() => updateRow(row.id, { quantity: (row.quantity || 0) + 1 })}
                         aria-label="Sumar una unidad"
-                        className="p-2 md:p-0.5 rounded hover:bg-blue-100 text-zinc-400 hover:text-blue-600 transition"
+                        className="flex h-10 w-10 shrink-0 md:h-auto md:w-auto items-center justify-center md:p-0.5 rounded hover:bg-blue-100 text-zinc-400 hover:text-blue-600 transition"
                       >
                         <ChevronUp size={14} />
                       </button>
@@ -853,7 +859,7 @@ export default function EstimateEditor({
           {/* Quick Add Buttons */}
           <div className="p-4 bg-zinc-50 border-t border-zinc-100 flex gap-3 items-center flex-wrap">
             {hasSection ? (
-              <button onClick={() => addServiceRow()} className="flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border border-blue-100">
+              <button onClick={() => addServiceRow()} className="flex items-center gap-2 min-h-[44px] md:min-h-0 text-sm font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border border-blue-100">
                 <Plus size={18} /> Añadir Línea
               </button>
             ) : (
@@ -869,7 +875,7 @@ export default function EstimateEditor({
               <button
                 onClick={handleTranslateForClient}
                 disabled={isTranslating}
-                className={`flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border ${
+                className={`flex items-center justify-center gap-2 min-h-[44px] md:min-h-0 text-sm font-bold px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border ${
                   translateDone
                     ? 'bg-green-50 text-green-700 border-green-200'
                     : 'bg-violet-50 text-violet-700 hover:bg-violet-100 border-violet-200'
@@ -917,22 +923,34 @@ export default function EstimateEditor({
           </div>
           <div className="flex w-full md:w-auto items-center justify-between md:justify-end gap-4 md:gap-8">
             <div className="hidden md:block text-zinc-500 text-sm font-bold">Líneas: {rows?.length || 0}</div>
-            <div className="flex flex-1 md:flex-none justify-between md:justify-end gap-4 md:gap-8">
-              <div className="text-right">
-                <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">Subtotal</div>
-                <div className="text-base md:text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
+            {/* Three figures on one line cannot fit 320px with their full labels: on a
+                phone the figures shrink a step and the labels become Base / IVA / Total
+                (the rate is already on the tax selector), so the TOTAL is never clipped. */}
+            <div className="flex flex-1 min-w-0 items-end justify-between gap-2 md:flex-none md:items-center md:justify-end md:gap-8">
+              <div className="min-w-0 text-right">
+                <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">
+                  <span className="md:hidden">Base</span>
+                  <span className="hidden md:inline">Subtotal</span>
+                </div>
+                <div className="text-xs sm:text-sm md:text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
                   {totals.subtotal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                 </div>
               </div>
-              <div className="text-right">
-                <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">{taxLabel(totals.taxRate)}</div>
-                <div className="text-base md:text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
+              <div className="min-w-0 text-right">
+                <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">
+                  <span className="md:hidden">IVA</span>
+                  <span className="hidden md:inline">{taxLabel(totals.taxRate)}</span>
+                </div>
+                <div className="text-xs sm:text-sm md:text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
                   {totals.tax.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                 </div>
               </div>
-              <div className="text-right">
-                <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">{totals.taxRate > 0 ? 'Total (con IVA)' : 'Total (sin IVA)'}</div>
-                <div className="text-2xl md:text-3xl font-black text-blue-600 tabular-nums tracking-tight">
+              <div className="min-w-0 text-right">
+                <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">
+                  <span className="md:hidden">Total</span>
+                  <span className="hidden md:inline">{totals.taxRate > 0 ? 'Total (con IVA)' : 'Total (sin IVA)'}</span>
+                </div>
+                <div className="text-lg md:text-3xl font-black text-blue-600 tabular-nums tracking-tight">
                   {totals.total.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                 </div>
               </div>
