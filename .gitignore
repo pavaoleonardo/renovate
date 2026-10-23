@@ -33,6 +33,12 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# local tooling — kept on disk, never in the public repo
+# `scripts/db.sh` loads DATABASE_URL from .env.local and `scripts/mobile-shots.mjs` reads QA
+# credentials from .env.e2e.local; everything else there is throwaway tooling. A fresh clone
+# gets none of it: copy the folder back by hand if you need it.
+/scripts
+
 # local env files
 .env*.local
 

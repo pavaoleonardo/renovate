@@ -9,8 +9,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npx tsc --noEmit && npm run lint && npm test",
-    "catalog:check": "node scripts/check-catalog.mjs"
+    "verify": "npx tsc --noEmit && npm run lint && npm test"
   },
   "dependencies": {
     "@supabase/ssr": "^0.8.0",
