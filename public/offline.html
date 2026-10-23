@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Renovate" />
+    <title>Sin conexión · Renovate</title>
+    <!--
+      The offline card the service worker serves when a navigation cannot reach
+      the network. It is a plain static file on purpose: it has to render with no
+      JavaScript, no fonts and no build step — that is the whole point.
+    -->
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: calc(1.5rem + env(safe-area-inset-top)) 1.25rem calc(1.5rem + env(safe-area-inset-bottom));
+        background: #fafafa;
+        color: #18181b;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        border-top: 4px solid #2563eb;
+      }
+      .card {
+        width: 100%;
+        max-width: 26rem;
+        background: #fff;
+        border: 1px solid #e4e4e7;
+        border-radius: 1.25rem;
+        box-shadow: 0 1px 2px rgba(24, 24, 27, 0.05), 0 12px 32px -12px rgba(24, 24, 27, 0.18);
+        padding: 2rem 1.5rem;
+        text-align: center;
+      }
+      /* The same brick wall the app lays while it loads, in CSS only. */
+      .wall {
+        width: 6.5rem;
+        margin: 0 auto 1.5rem;
+        display: grid;
+        gap: 6px;
+      }
+      .wall span {
+        height: 1rem;
+        border-radius: 4px;
+        background: #2563eb;
+      }
+      .wall .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+      .wall .row.offset {
+        grid-template-columns: 1.4fr 1fr 0.6fr;
+      }
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: 1.375rem;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+      }
+      p {
+        margin: 0 0 1.5rem;
+        font-size: 0.9375rem;
+        line-height: 1.55;
+        color: #52525b;
+      }
+      button {
+        width: 100%;
+        min-height: 48px;
+        border: 0;
+        border-radius: 0.75rem;
+        background: #2563eb;
+        color: #fff;
+        font: inherit;
+        font-weight: 700;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+      button:active {
+        background: #1d4ed8;
+      }
+      .hint {
+        margin: 1rem 0 0;
+        font-size: 0.8125rem;
+        color: #71717a;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div class="wall" aria-hidden="true">
+        <div class="row"><span></span><span></span></div>
+        <div class="row offset"><span></span><span></span><span></span></div>
+        <div class="row"><span></span><span></span></div>
+      </div>
+      <h1>Sin conexión</h1>
+      <p>
+        Los presupuestos se leen del servidor, así que ahora mismo no hay nada que enseñar. En
+        cuanto vuelva la cobertura, todo está donde lo dejaste.
+      </p>
+      <button type="button" onclick="window.location.reload()">Reintentar</button>
+      <p class="hint">No se puede guardar nada sin conexión: tus cambios se envían al servidor.</p>
+    </main>
+  </body>
+</html>

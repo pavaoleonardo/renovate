@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Renovate</title>
+  <rect width="512" height="512" fill="#2563eb"/>
+  <clipPath id="wall">
+    <rect x="80" y="160" width="352" height="192" rx="20"/>
+  </clipPath>
+  <g transform="translate(256 256) scale(0.94) translate(-256 -256)" clip-path="url(#wall)" fill="#ffffff">
+    <rect x="80" y="160" width="170" height="56" rx="6"/>
+    <rect x="262" y="160" width="170" height="56" rx="6"/>
+    <rect x="-5" y="228" width="170" height="56" rx="6"/>
+    <rect x="177" y="228" width="170" height="56" rx="6"/>
+    <rect x="359" y="228" width="170" height="56" rx="6"/>
+    <rect x="80" y="296" width="170" height="56" rx="6"/>
+    <rect x="262" y="296" width="170" height="56" rx="6"/>
+  </g>
+</svg>

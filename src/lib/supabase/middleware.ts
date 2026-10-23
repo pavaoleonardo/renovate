@@ -53,8 +53,23 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const path = request.nextUrl.pathname;
-  
-  const publicPaths = ['/login', '/', '/login/signup', '/login/forgot-password', '/auth/reset-password'];
+
+  /**
+   * `sw.js`, the manifest and the offline card are fetched by the browser itself,
+   * not by a signed-in user sitting on a page: if the auth gate answered them with
+   * a redirect to `/login`, the install prompt would never appear and the worker
+   * would never register — precisely when the session cookie has expired.
+   */
+  const publicPaths = [
+    '/login',
+    '/',
+    '/login/signup',
+    '/login/forgot-password',
+    '/auth/reset-password',
+    '/offline.html',
+    '/sw.js',
+    '/manifest.webmanifest',
+  ];
   if (!user && !publicPaths.includes(path)) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'

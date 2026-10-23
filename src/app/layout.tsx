@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server';
 import { signOut } from './login/actions';
 import AuthSessionHandler from '@/components/AuthSessionHandler';
 import CompanyBrand from '@/components/CompanyBrand';
+import ServiceWorkerRegistrar from '@/components/ServiceWorkerRegistrar';
 import SubmitButton from '@/components/SubmitButton';
 import type { CompanyBrandInfo } from '@/types';
 
@@ -14,6 +15,18 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 export const metadata: Metadata = {
   title: 'Renovate MVP - Presupuestos de Construcción',
   description: 'SaaS vertical rápido para presupuestos de reformas.',
+  applicationName: 'Renovate',
+  /**
+   * iOS ignores the manifest's colours when the app is added to the home screen:
+   * it reads these three tags instead. `capable` is what opens the site without
+   * Safari's chrome; `title` is the label under the icon. The icons themselves
+   * are `src/app/apple-icon.png` (Next adds its `<link>`).
+   */
+  appleWebApp: {
+    capable: true,
+    title: 'Renovate',
+    statusBarStyle: 'default',
+  },
   // Build fingerprint: lets you confirm which deployment a browser is showing.
   // View Source → search "build-commit".
   other: {
@@ -69,6 +82,8 @@ export default async function RootLayout({
     <html lang="es" className={`${inter.variable} font-sans antialiased`}>
       <body className="bg-zinc-50 min-h-screen border-t-4 border-blue-600">
         <AuthSessionHandler />
+        {/* Installs the offline shell (`public/sw.js`) in production only. */}
+        <ServiceWorkerRegistrar />
 
         {/* Global Nav MVP */}
         <nav className="bg-white border-b border-zinc-200 shadow-sm sticky top-0 z-40 pt-[env(safe-area-inset-top)]">
