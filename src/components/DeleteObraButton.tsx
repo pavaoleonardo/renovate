@@ -47,7 +47,7 @@ export default function DeleteObraButton({ estimateId, address }: { estimateId: 
         }}
         disabled={deleting}
         title="Eliminar esta obra vacía"
-        className="flex items-center gap-1.5 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1.5 rounded-lg font-bold text-xs transition disabled:opacity-60 disabled:cursor-progress whitespace-nowrap"
+        className="flex items-center gap-1.5 min-h-[44px] md:min-h-0 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2.5 py-1.5 rounded-lg font-bold text-xs transition disabled:opacity-60 disabled:cursor-progress whitespace-nowrap"
       >
         {deleting ? (
           <ConstructionLoader size="sm" label="Eliminando…" />

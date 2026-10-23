@@ -38,7 +38,12 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
 
   return (
     <div className="max-w-shell mx-auto py-12 px-4 sm:px-6 lg:px-8">
-      <Link href="/clients" className="text-sm font-bold text-zinc-400 hover:text-zinc-900 transition">
+      {/* `min-h-[44px]` is the thumb target, not decoration: a bare 17px line of text
+          is a miss with a finger (see the mobile rules in SPEC.md §5). */}
+      <Link
+        href="/clients"
+        className="inline-flex items-center min-h-[44px] text-sm font-bold text-zinc-400 hover:text-zinc-900 transition"
+      >
         &larr; Clientes
       </Link>
 
@@ -55,18 +60,21 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
         <ClientCard client={client} />
 
         <div className="bg-white rounded-xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 overflow-hidden">
-          <div className="px-5 py-4 border-b border-zinc-100 flex items-center justify-between gap-4 flex-wrap">
+          <div className="px-5 py-4 border-b border-zinc-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
             <h2 className="font-black text-zinc-900">Obras</h2>
-            <form action={handleNewObra} className="flex gap-2 items-center">
+            {/* On a phone the field and its button get a row each. Side by side they
+                need ~270px and there are ~250px inside this card, whose `overflow-hidden`
+                clipped the button to «+ N…» instead of letting it wrap. */}
+            <form action={handleNewObra} className="flex flex-col sm:flex-row gap-2 sm:items-center w-full sm:w-auto">
               <input
                 type="text"
                 name="address"
                 placeholder="Dirección de la obra..."
-                className="px-3 py-2 bg-zinc-50 border-transparent rounded-lg text-sm font-medium text-zinc-900 focus:bg-white focus:ring-2 focus:ring-blue-100 outline-none"
+                className="w-full sm:w-56 min-w-0 px-3 py-2 bg-zinc-50 border-transparent rounded-lg text-sm font-medium text-zinc-900 focus:bg-white focus:ring-2 focus:ring-blue-100 outline-none"
               />
               <SubmitButton
                 pendingLabel="Creando la obra…"
-                className="shrink-0 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-4 py-2 rounded-lg font-bold text-sm shadow transition whitespace-nowrap disabled:bg-blue-400"
+                className="shrink-0 flex items-center justify-center gap-2 min-h-[44px] sm:min-h-0 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-4 py-2 rounded-lg font-bold text-sm shadow transition whitespace-nowrap disabled:bg-blue-400"
               >
                 <Plus size={16} /> Nueva obra
               </SubmitButton>

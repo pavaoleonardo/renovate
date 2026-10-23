@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FocusEvent } from 'react'
 import {
   addCatalogService,
   createCatalogPhase,
@@ -115,6 +115,43 @@ const priceTextClass = (service: CatalogService) => {
  * Dot that says whether the price is inside the market band, next to the price field.
  * The "Mercado" column is desktop-only, so this keeps the reference visible on a phone.
  */
+/**
+ * The name of a partida. A single-line `<input>` is right in a desktop table, but on a
+ * phone it cut every name mid-word («Picado de alicatado o…») and the catalogue turned
+ * into a list you could not read. Below `md` the name is a wrapping box instead; Enter
+ * saves it exactly like the input does, and the two share one handler.
+ */
+function ServiceNameField({ service, onRename }: { service: CatalogService; onRename: (name: string) => void }) {
+  const shared = {
+    defaultValue: service.name,
+    title: service.name,
+    'aria-label': `Nombre de ${service.name}`,
+    onBlur: (e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (e.target.value !== service.name) onRename(e.target.value)
+    },
+  }
+
+  return (
+    <>
+      <textarea
+        {...shared}
+        rows={2}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            e.currentTarget.blur()
+          }
+        }}
+        className="md:hidden flex-1 min-w-0 resize-none font-medium text-zinc-900 text-sm leading-snug bg-transparent border border-transparent focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 transition"
+      />
+      <input
+        {...shared}
+        className="hidden md:block flex-1 min-w-0 font-medium text-zinc-900 text-sm bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 transition"
+      />
+    </>
+  )
+}
+
 function PriceBandDot({ service }: { service: CatalogService }) {
   const state = priceBandState(service)
   if (!state) return null
@@ -1537,13 +1574,9 @@ export default function CatalogPage() {
                               {service.code}
                             </span>
                           )}
-                          <input
-                            defaultValue={service.name}
-                            title={service.name}
-                            onBlur={(e) =>
-                              e.target.value !== service.name && handleUpdate(service.id, { name: e.target.value })
-                            }
-                            className="flex-1 min-w-0 font-medium text-zinc-900 text-sm bg-transparent border border-transparent hover:border-zinc-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded px-1.5 py-1 transition"
+                          <ServiceNameField
+                            service={service}
+                            onRename={(name) => handleUpdate(service.id, { name })}
                           />
                         </div>
                         {service.description && (

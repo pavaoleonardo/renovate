@@ -33,7 +33,7 @@ function AddSectionControl({
   size?: 'sm' | 'lg';
 }) {
   const className = size === 'lg'
-    ? 'text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-6 py-4 rounded-xl transition shadow-sm border-2 border-blue-200 cursor-pointer appearance-none text-center active:scale-[0.99]'
+    ? 'w-full md:w-auto min-w-0 text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-4 sm:px-6 py-4 rounded-xl transition shadow-sm border-2 border-blue-200 cursor-pointer appearance-none text-center active:scale-[0.99]'
     : 'text-sm font-bold text-zinc-700 bg-white hover:bg-zinc-50 px-4 py-2 rounded-lg transition shadow-sm border border-zinc-200 cursor-pointer appearance-none pr-8';
 
   return (
@@ -49,7 +49,7 @@ function AddSectionControl({
         e.target.value = '';
       }}
     >
-      <option value="" disabled>{size === 'lg' ? 'Elegir sección del catálogo…' : '+ Añadir Sección...'}</option>
+      <option value="" disabled>{size === 'lg' ? 'Elegir sección…' : '+ Añadir Sección...'}</option>
       {catalogPhases.map(phaseName => (
         <option key={phaseName} value={phaseName}>{phaseName}</option>
       ))}
@@ -452,7 +452,7 @@ export default function EstimateEditor({
                 {estimate.client_name || 'Sin cliente'}
               </h1>
               {estimate.client_id ? (
-                <Link href={`/clients/${estimate.client_id}`} className="text-xs font-bold text-blue-600 hover:underline whitespace-nowrap">
+                <Link href={`/clients/${estimate.client_id}`} className="inline-flex items-center min-h-[44px] text-xs font-bold text-blue-600 hover:underline whitespace-nowrap">
                   Ver ficha
                 </Link>
               ) : (
@@ -603,7 +603,7 @@ export default function EstimateEditor({
         {/* DOCUMENT ROWS */}
         <div className="bg-white rounded-xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 overflow-hidden">
           {isBlankBudget ? (
-            <div className="p-10 md:p-14 text-center">
+            <div className="p-6 sm:p-10 md:p-14 text-center">
               <div className="mx-auto w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4">
                 <Plus size={22} />
               </div>

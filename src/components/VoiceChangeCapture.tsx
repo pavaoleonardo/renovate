@@ -136,8 +136,8 @@ export default function VoiceChangeCapture({
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          rows={2}
-          placeholder="Ej.: pon tres enchufes más en el salón, cambia las puertas a cinco y quita la bañera…"
+          rows={3}
+          placeholder="Ej.: pon tres enchufes más en el salón y quita la bañera…"
           className="flex-1 px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm text-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-100 resize-y"
         />
         <VoiceButton onTranscript={(chunk) => setText((prev) => appendTranscript(prev, chunk))} className="h-[42px]" />

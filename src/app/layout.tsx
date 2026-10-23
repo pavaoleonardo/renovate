@@ -106,7 +106,7 @@ export default async function RootLayout({
                 <Link
                   href="/clients"
                   title={company.name}
-                  className="flex items-center gap-2 min-w-0 min-h-[44px] hover:opacity-80 transition"
+                  className="flex items-center gap-2 min-w-[44px] justify-end min-h-[44px] hover:opacity-80 transition"
                 >
                   <CompanyBrand name={company.name} logoUrl={company.logo_url} />
                   <span className="hidden sm:inline truncate max-w-[9rem] lg:max-w-[12rem] text-sm lg:text-base font-extrabold tracking-tight text-zinc-900">
@@ -139,9 +139,11 @@ export default async function RootLayout({
           {user && (
             <div className="md:hidden border-t border-zinc-100">
               <div className="px-4 h-11 flex items-center gap-6 text-sm font-bold text-zinc-500 overflow-x-auto">
-                <Link href="/clients" className="hover:text-zinc-900 transition whitespace-nowrap">Clientes</Link>
-                <Link href="/catalog" className="hover:text-zinc-900 transition whitespace-nowrap">Catálogo</Link>
-                <Link href="/settings" className="hover:text-zinc-900 transition whitespace-nowrap">Ajustes</Link>
+                {/* The row is 44px tall; each link fills it, or the target is a 20px strip
+                    of text inside a thumb-sized row. */}
+                <Link href="/clients" className="inline-flex items-center min-h-[44px] hover:text-zinc-900 transition whitespace-nowrap">Clientes</Link>
+                <Link href="/catalog" className="inline-flex items-center min-h-[44px] hover:text-zinc-900 transition whitespace-nowrap">Catálogo</Link>
+                <Link href="/settings" className="inline-flex items-center min-h-[44px] hover:text-zinc-900 transition whitespace-nowrap">Ajustes</Link>
               </div>
             </div>
           )}

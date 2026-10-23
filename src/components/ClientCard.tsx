@@ -102,11 +102,13 @@ export default function ClientCard({ client }: { client: Client }) {
 
       {error && <p className="mt-3 text-xs font-bold text-red-500">{error}</p>}
 
-      <div className="mt-4 flex items-center gap-3">
+      {/* Two full-width rows on a phone: side by side, «Guardar ficha» wrapped onto two
+          lines and «Eliminar» still left the row awkwardly balanced. */}
+      <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3">
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-2 bg-zinc-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold text-sm transition disabled:bg-zinc-700 disabled:cursor-progress"
+          className="flex items-center justify-center gap-2 w-full sm:w-auto min-h-[44px] sm:min-h-0 bg-zinc-900 hover:bg-black text-white px-4 py-2 rounded-lg font-bold text-sm transition whitespace-nowrap disabled:bg-zinc-700 disabled:cursor-progress"
         >
           {saving ? (
             <ConstructionLoader size="sm" tone="invert" label="Guardando…" />
@@ -126,7 +128,7 @@ export default function ClientCard({ client }: { client: Client }) {
           }}
           disabled={deleting}
           title="Solo se puede borrar un cliente sin obras"
-          className="ml-auto flex items-center gap-2 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-4 py-2 rounded-lg font-bold text-sm transition disabled:opacity-60 disabled:cursor-progress"
+          className="sm:ml-auto flex items-center justify-center gap-2 w-full sm:w-auto min-h-[44px] sm:min-h-0 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-4 py-2 rounded-lg font-bold text-sm transition whitespace-nowrap disabled:opacity-60 disabled:cursor-progress"
         >
           {deleting ? (
             <ConstructionLoader size="sm" label="Eliminando…" />
