@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { Fragment, useState, useMemo, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { Estimate, EstimateRow, CatalogService, Client, EstimateStatus, CompanyProfile, PendingNote, VoiceProposalLine } from '@/types';
 import { saveEstimateRows, updateEstimateStatus, updateEstimateInfo, updateEstimateTaxRate, addPendingNote, convertPendingNote, dismissPendingNote, addClient, assignEstimateClient } from '@/app/actions';
@@ -13,6 +13,7 @@ import DecimalInput from './DecimalInput';
 import PendingNotesPanel from './PendingNotesPanel';
 import ConstructionLoader from './ConstructionLoader';
 import VoiceChangeCapture from './VoiceChangeCapture';
+import MobileLineCard from './MobileLineCard';
 import { pendingToRow } from '@/lib/pending-notes';
 import { moveItem } from '@/lib/reorder';
 import { applyVoiceOps } from '@/lib/voice-change';
@@ -34,7 +35,7 @@ function AddSectionControl({
 }) {
   const className = size === 'lg'
     ? 'w-full md:w-auto min-w-0 text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-4 sm:px-6 py-4 rounded-xl transition shadow-sm border-2 border-blue-200 cursor-pointer appearance-none text-center active:scale-[0.99]'
-    : 'text-sm font-bold text-zinc-700 bg-white hover:bg-zinc-50 px-4 py-2 rounded-lg transition shadow-sm border border-zinc-200 cursor-pointer appearance-none pr-8';
+    : 'w-full md:w-auto md:max-w-[220px] min-w-0 text-sm font-bold text-zinc-700 bg-white hover:bg-zinc-50 px-3 md:px-4 py-2 rounded-lg transition shadow-sm border border-zinc-200 cursor-pointer appearance-none pr-8';
 
   return (
     <select
@@ -49,7 +50,7 @@ function AddSectionControl({
         e.target.value = '';
       }}
     >
-      <option value="" disabled>{size === 'lg' ? 'Elegir sección…' : '+ Añadir Sección...'}</option>
+      <option value="" disabled>{size === 'lg' ? 'Elegir sección…' : '+ Sección'}</option>
       {catalogPhases.map(phaseName => (
         <option key={phaseName} value={phaseName}>{phaseName}</option>
       ))}
@@ -436,39 +437,57 @@ export default function EstimateEditor({
 
   return (
     <>
-      <div className="no-print-area max-w-shell mx-auto py-10 px-4 sm:px-6 lg:px-8 min-h-screen pb-48 md:pb-40">
+      <div className="no-print-area max-w-shell mx-auto py-6 px-4 sm:py-10 sm:px-6 lg:px-8 min-h-screen pb-32 md:pb-40 flex flex-col">
         
         {/* HEADER ... rest of editor ... */}
         {/* (I'll keep the same structure but ensuring the no-print-area div closes before the modal) */}
         {/* ... */}
-        <div className="bg-white p-6 rounded-xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div className="order-1 bg-white p-4 sm:p-6 rounded-xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           {/* ... header content ... */}
           <div>
             {/* The client is its own ficha (one client, many obras), so its name is
                 chosen here and not typed: renaming it on the ficha updates every
                 obra that points at it. */}
-            <div className="flex items-center gap-2 flex-wrap px-2">
-              <h1 className="text-3xl font-extrabold text-zinc-900 tracking-tight">
+            <div className="flex items-start justify-between gap-2 md:justify-start">
+              <h1 className="min-w-0 text-2xl font-extrabold leading-tight tracking-tight text-zinc-900 sm:text-3xl">
                 {estimate.client_name || 'Sin cliente'}
               </h1>
               {estimate.client_id ? (
-                <Link href={`/clients/${estimate.client_id}`} className="inline-flex items-center min-h-[44px] text-xs font-bold text-blue-600 hover:underline whitespace-nowrap">
+                <Link href={`/clients/${estimate.client_id}`} className="mt-0.5 inline-flex shrink-0 items-center min-h-[44px] md:mt-0 text-xs font-bold text-blue-600 hover:underline whitespace-nowrap">
                   Ver ficha
                 </Link>
               ) : (
-                <span className="text-[10px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+                <span className="shrink-0 text-[10px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
                   sin cliente
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2 px-2 mt-1 flex-wrap">
+            <div className="mt-3 md:max-w-[320px]">
+              {/* On a phone the picker gets the whole width: sharing a row with
+                  «+ Nuevo cliente» left it 180px wide and cut «Cliente Prueba
+                  Movil 13:51:09» to «Cliente Prueba Movil 13». */}
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="estimate-client" className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                  Cliente
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewClient(v => !v)}
+                    className="inline-flex items-center min-h-[44px] md:min-h-0 text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1.5 rounded-lg transition whitespace-nowrap"
+                  >
+                    + Nuevo cliente
+                  </button>
+                  {clientBusy && <ConstructionLoader size="sm" />}
+                </div>
+              </div>
               <select
+                id="estimate-client"
                 value={estimate.client_id || ''}
                 onChange={(e) => handleClientChange(e.target.value)}
                 disabled={clientBusy}
                 title="Cliente al que pertenece esta obra"
-                aria-label="Cliente de la obra"
-                className="text-xs font-bold text-zinc-600 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-lg py-1.5 pl-2 pr-7 min-h-[44px] md:min-h-0 transition cursor-pointer disabled:opacity-50 max-w-[240px]"
+                className="mt-1 w-full md:max-w-[240px] text-sm md:text-xs font-bold text-zinc-600 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 rounded-lg py-1.5 pl-3 md:pl-2 pr-7 min-h-[44px] md:min-h-0 transition cursor-pointer disabled:opacity-50"
               >
                 <option value="" disabled>
                   {clients.length === 0 ? 'No hay clientes todavía' : 'Elegir cliente…'}
@@ -477,14 +496,6 @@ export default function EstimateEditor({
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
-              <button
-                type="button"
-                onClick={() => setShowNewClient(v => !v)}
-                className="inline-flex items-center min-h-[44px] md:min-h-0 text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-2 py-1.5 rounded-lg transition whitespace-nowrap"
-              >
-                + Nuevo cliente
-              </button>
-              {clientBusy && <ConstructionLoader size="sm" />}
             </div>
             {clientError && <p className="text-[10px] font-bold text-red-500 px-2 mt-1">{clientError}</p>}
             {showNewClient && (
@@ -536,72 +547,82 @@ export default function EstimateEditor({
               </div>
             )}
           </div>
-          <div className="flex flex-col items-end gap-3 w-full md:w-auto">
-            <div className="flex items-center gap-3">
-               <span className="text-sm font-bold text-zinc-400 uppercase tracking-wider">Estado</span>
-               <select 
-                value={estimate.status} 
-                onChange={handleStatusChange}
-                className="border-zinc-200 rounded-lg shadow-sm font-bold bg-white text-zinc-800 py-2 pl-4 pr-10 focus:ring-blue-500 focus:border-blue-500 transition cursor-pointer"
-              >
-                <option value="draft">Pendiente</option>
-                <option value="sent">Enviado</option>
-                <option value="approved">Aceptado</option>
-                <option value="rejected">Rechazado</option>
-                <option value="in_progress">En Curso</option>
-                <option value="completed">Completado</option>
-                <option value="expired">Caducado</option>
-              </select>
-            </div>
-           
-            <div className="flex flex-col items-end">
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-bold text-zinc-400 uppercase tracking-wider">IVA</span>
+          <div className="w-full md:w-auto md:flex md:flex-col md:items-end md:gap-3">
+            {/* Estado + IVA share one row on a phone, each with its label above the
+                field: two right-aligned label/select pairs of different widths read
+                as a staircase at 320px. */}
+            <div className="grid grid-cols-2 gap-2 md:flex md:flex-col md:items-end md:gap-3">
+              <div className="flex min-w-0 flex-col gap-0.5 md:flex-row md:items-center md:gap-3">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 md:text-sm">Estado</span>
+                <select
+                  value={estimate.status}
+                  onChange={handleStatusChange}
+                  className="h-11 w-full rounded-lg border-zinc-200 bg-white px-3 text-base font-bold text-zinc-800 shadow-sm transition focus:border-blue-500 focus:ring-blue-500 md:h-auto md:w-auto md:py-2 md:pl-4 md:pr-10 md:text-sm"
+                >
+                  <option value="draft">Pendiente</option>
+                  <option value="sent">Enviado</option>
+                  <option value="approved">Aceptado</option>
+                  <option value="rejected">Rechazado</option>
+                  <option value="in_progress">En Curso</option>
+                  <option value="completed">Completado</option>
+                  <option value="expired">Caducado</option>
+                </select>
+              </div>
+
+              <div className="flex min-w-0 flex-col gap-0.5 md:flex-row md:items-center md:gap-3">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 md:text-sm">IVA</span>
                 <select
                   value={totals.taxRate}
                   onChange={handleTaxRateChange}
                   disabled={isSavingTax}
                   title={taxHint(totals.taxRate)}
-                  className="border-zinc-200 rounded-lg shadow-sm font-bold bg-white text-zinc-800 py-2 pl-4 pr-10 focus:ring-blue-500 focus:border-blue-500 transition cursor-pointer disabled:opacity-50"
+                  className="h-11 w-full rounded-lg border-zinc-200 bg-white px-3 text-base font-bold text-zinc-800 shadow-sm transition focus:border-blue-500 focus:ring-blue-500 md:h-auto md:w-auto md:py-2 md:pl-4 md:pr-10 md:text-sm disabled:opacity-50"
                 >
                   {TAX_RATE_OPTIONS.map(option => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
               </div>
-              <p className="text-[10px] font-medium text-zinc-400 mt-1 inline-flex items-center gap-1.5">
-                {taxHint(totals.taxRate)}
-                {isSavingTax && <ConstructionLoader size="sm" />}
-              </p>
-              {taxError && (
-                <p className="text-[10px] font-bold text-red-500 mt-1 max-w-[260px] text-right">{taxError}</p>
-              )}
             </div>
-            
-            <button 
+            <p className="mt-1.5 inline-flex items-center gap-1.5 text-[10px] font-medium text-zinc-400 md:mt-0">
+              {taxHint(totals.taxRate)}
+              {isSavingTax && <ConstructionLoader size="sm" />}
+            </p>
+            {taxError && (
+              <p className="mt-1 max-w-[260px] text-[10px] font-bold text-red-500 md:text-right">{taxError}</p>
+            )}
+
+            <button
               onClick={() => setShowPreview(true)}
-              className="flex items-center justify-center gap-2 min-h-[44px] md:min-h-0 text-zinc-600 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 px-4 py-2 rounded-lg transition font-semibold text-sm w-full md:w-auto"
+              className="mt-3 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-200 hover:text-zinc-900 md:mt-0 md:min-h-0 md:w-auto"
             >
               <Printer size={18} /> Exportar PDF
             </button>
           </div>
         </div>
 
-        <VoiceChangeCapture
-          outline={voiceOutline}
-          catalog={voiceCatalog}
-          onAddNote={handleAddPending}
-          onApply={handleApplyVoice}
-        />
+        {/* On a phone the budget itself comes first: the two helper panels (dictation
+            and captured changes) sat between the header and the lines, pushing the
+            first line 800px down the screen. */}
+        <div className="order-3 md:order-2">
+          <VoiceChangeCapture
+            outline={voiceOutline}
+            catalog={voiceCatalog}
+            onAddNote={handleAddPending}
+            onApply={handleApplyVoice}
+          />
+        </div>
 
-        <PendingNotesPanel
-          notes={pendingNotes}
-          onConvert={handleConvertPending}
-          onDismiss={handleDismissPending}
-        />
+        <div className="order-4 md:order-3">
+          <PendingNotesPanel
+            notes={pendingNotes}
+            onConvert={handleConvertPending}
+            onDismiss={handleDismissPending}
+          />
+        </div>
 
         {/* DOCUMENT ROWS */}
-        <div className="bg-white rounded-xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 overflow-hidden">
+        <div className="order-2 md:order-4 bg-white rounded-xl shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-zinc-100 overflow-hidden">
           {isBlankBudget ? (
             <div className="p-6 sm:p-10 md:p-14 text-center">
               <div className="mx-auto w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mb-4">
@@ -648,7 +669,7 @@ export default function EstimateEditor({
             <div></div>
           </div>
 
-          <div className="divide-y divide-zinc-50">
+          <div className="divide-y divide-zinc-100">
             {(rows || []).map((row, rowIndex) => {
               /**
                * Cada línea pertenece a la sección que tiene encima: es la única
@@ -668,7 +689,7 @@ export default function EstimateEditor({
                     onDragOver={(e) => handleDragOver(rowIndex, e)}
                     onDrop={(e) => handleDrop(rowIndex, e)}
                     onDragEnd={handleDragEnd}
-                    className={`grid grid-cols-[1fr_auto] md:grid-cols-[30px_1fr_auto] gap-2 md:gap-3 p-3 md:p-2 bg-blue-50/40 hover:bg-blue-50/80 items-center group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
+                    className={`flex flex-wrap items-center gap-x-1 gap-y-0 md:grid md:grid-cols-[30px_1fr_auto] md:gap-3 p-3 md:p-2 bg-blue-50/40 hover:bg-blue-50/80 group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
                   >
                     {/* The grip is a mouse affordance: HTML5 drag cannot be started by a
                         finger, so on a phone it is not rendered instead of sitting there
@@ -676,12 +697,12 @@ export default function EstimateEditor({
                         header — is still to come. */}
                     <div className="hidden md:flex text-center cursor-grab active:cursor-grabbing text-zinc-300 hover:text-blue-500"><GripVertical size={18}/></div>
                     <input 
-                      className="font-extrabold text-xl text-blue-900 bg-transparent border-none focus:ring-2 focus:ring-blue-200 rounded-md px-2 py-1 placeholder:text-blue-300 w-full transition"
+                      className="w-full md:w-auto min-w-0 font-extrabold text-base md:text-xl text-blue-900 bg-transparent border-none focus:ring-2 focus:ring-blue-200 rounded-md px-1 md:px-2 py-1 placeholder:text-blue-300 transition"
                       value={row.phase_name_snapshot || ''}
                       onChange={(e) => updateRow(row.id, { phase_name_snapshot: e.target.value })}
                       placeholder="Nombre de Sección"
                     />
-                    <div className="flex items-center gap-1">
+                    <div className="ml-auto flex items-center gap-1 md:ml-0">
                       <button
                         type="button"
                         onClick={() => addServiceRow(rowIndex)}
@@ -703,17 +724,30 @@ export default function EstimateEditor({
               }
 
               return (
-                <div 
-                  key={row.id}
+                <Fragment key={row.id}>
+                {/* The phone gets the same line as a collapsible card; the table below
+                    is only rendered from md up. Both read and write the same row. */}
+                <MobileLineCard
+                  row={row}
+                  rowIndex={rowIndex}
+                  rowCount={rows.length}
+                  sectionServices={sectionServices}
+                  parentPhase={parentPhase}
+                  onUpdate={updateRow}
+                  onMove={moveRowBy}
+                  onRemove={removeRow}
+                  onApplyService={applyService}
+                />
+                <div
                   draggable
                   onDragStart={(e) => handleDragStart(rowIndex, e)}
                   onDragOver={(e) => handleDragOver(rowIndex, e)}
                   onDrop={(e) => handleDrop(rowIndex, e)}
                   onDragEnd={handleDragEnd}
-                  className={`grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] md:grid-cols-[30px_1fr_60px_100px_80px_100px_30px] gap-3 p-4 md:p-2 md:items-center border-b border-zinc-100 md:border-0 hover:bg-zinc-50/80 group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
+                  className={`hidden md:grid md:grid-cols-[30px_1fr_60px_100px_80px_100px_30px] md:gap-3 md:p-2 md:items-center hover:bg-zinc-50/80 group transition ${dropIndex === rowIndex ? 'border-t-2 border-blue-500' : ''}`}
                 >
                    <div className="hidden md:flex text-center cursor-grab active:cursor-grabbing text-zinc-200 hover:text-zinc-400 justify-center"><GripVertical size={16}/></div>
-                   <div className="col-span-2 md:col-span-1 flex flex-col gap-1">
+                   <div className="md:col-span-1 flex flex-col gap-1">
                      <div className="relative flex items-center rounded-md border border-transparent hover:border-zinc-200 focus-within:bg-white focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 transition">
                          <input
                            className="font-medium text-zinc-900 bg-transparent rounded-md pl-2 pr-7 py-1.5 placeholder:text-zinc-300 border-none focus:ring-0 w-full"
@@ -746,7 +780,6 @@ export default function EstimateEditor({
                        {/* The client note lives in its own full-width row below (9th grid cell). */}
                     </div>
                     <div className="flex flex-col gap-1">
-                    <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Unid</label>
                     <input 
                       className="w-full text-center bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-100 rounded-md px-1 py-1.5 text-xs font-bold transition text-zinc-500 uppercase"
                       value={row.unit_snapshot || ''}
@@ -755,7 +788,6 @@ export default function EstimateEditor({
                     />
                     </div>
                     <div className="flex flex-col gap-1">
-                    <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-right">Precio</label>
                       <div className="relative">
                       <span className="absolute right-2 top-1.5 text-zinc-400 text-sm pointer-events-none">€</span>
                       {/* A plain text field with a decimal keypad: `type="number"` throws
@@ -771,7 +803,6 @@ export default function EstimateEditor({
                     </div>
                     </div>
                     <div className="flex flex-col gap-1">
-                    <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Cant</label>
                     <div className="flex items-center gap-0.5 justify-center">
                       <button
                         type="button"
@@ -798,50 +829,26 @@ export default function EstimateEditor({
                     </div>
                     </div>
                     <div className="flex flex-col gap-1 text-right">
-                    <label className="md:hidden text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-right">Total</label>
                     <div className="text-right text-sm font-extrabold text-zinc-900 tabular-nums">
                       {calcRowTotal(row).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                     </div>
                     </div>
-                    {/* One cell in both layouts: the delete button, plus — only where a
-                        finger does the work — the arrows that move this line up or down.
-                        The grip is hidden on a phone, so this strip is the whole
-                        reordering affordance there, and every target is thumb-sized. */}
-                    <div className="col-span-2 md:col-span-1 flex items-center justify-between md:justify-center">
-                      <div className="flex md:hidden items-center">
-                        <button
-                          type="button"
-                          onClick={() => moveRowBy(rowIndex, -1)}
-                          disabled={rowIndex === 0}
-                          aria-label="Subir esta línea"
-                          title="Subir esta línea"
-                          className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition disabled:opacity-25 disabled:hover:bg-transparent"
-                        >
-                          <ChevronUp size={18} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => moveRowBy(rowIndex, 1)}
-                          disabled={rowIndex === rows.length - 1}
-                          aria-label="Bajar esta línea"
-                          title="Bajar esta línea"
-                          className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition disabled:opacity-25 disabled:hover:bg-transparent"
-                        >
-                          <ChevronDown size={18} />
-                        </button>
-                      </div>
+                    {/* One cell in both layouts: the delete button. The arrows that move
+                        this line live in the phone card (the grip is a mouse affordance
+                        and is not rendered below md). */}
+                    <div className="md:col-span-1 flex items-center justify-center">
                       <button
                         onClick={() => removeRow(row.id)}
                         aria-label="Eliminar esta línea"
                         title="Eliminar esta línea"
-                        className="flex h-11 w-11 md:h-auto md:w-auto items-center justify-center rounded-lg md:rounded-none text-zinc-300 hover:text-red-500 hover:bg-red-50 md:hover:bg-transparent transition md:opacity-0 md:group-hover:opacity-100"
+                        className="flex md:h-auto md:w-auto items-center justify-center md:rounded-none text-zinc-300 hover:text-red-500 hover:bg-red-50 md:hover:bg-transparent transition md:opacity-0 md:group-hover:opacity-100"
                       >
                         <Trash2 size={16} />
                       </button>
                     </div>
                     {/* 9th cell: the client note, a full-width row of its own (md). It grows with
                         the text, so a long AI-generated paragraph is readable without clipping. */}
-                    <div className="col-span-2 md:col-span-full md:pl-[42px]">
+                    <div className="md:col-span-full md:pl-[42px]">
                       <AutoGrowTextarea
                         className="text-xs text-zinc-500 bg-transparent border border-transparent hover:border-zinc-200 focus:bg-white focus:border-blue-300 focus:ring-1 focus:ring-blue-100 rounded-md px-2 py-1 placeholder:text-zinc-300 transition w-full resize-none leading-relaxed"
                         value={row.client_note || ''}
@@ -851,31 +858,34 @@ export default function EstimateEditor({
                       />
                     </div>
                 </div>
+                </Fragment>
               );
             })}
           </div>
           </div>
 
-          {/* Quick Add Buttons */}
-          <div className="p-4 bg-zinc-50 border-t border-zinc-100 flex gap-3 items-center flex-wrap">
+          {/* Quick Add Buttons — a two-column grid on a phone. As a wrapping flex
+              row the section `<select>` sized itself to its longest option and ran
+              past the card's right edge. */}
+          <div className="grid grid-cols-2 gap-2 p-4 bg-zinc-50 border-t border-zinc-100 md:flex md:flex-wrap md:items-center md:gap-3">
             {hasSection ? (
-              <button onClick={() => addServiceRow()} className="flex items-center gap-2 min-h-[44px] md:min-h-0 text-sm font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border border-blue-100">
-                <Plus size={18} /> Añadir Línea
+              <button onClick={() => addServiceRow()} className="flex items-center justify-center gap-2 min-h-[44px] md:min-h-0 text-sm font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 md:px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border border-blue-100 whitespace-nowrap">
+                <Plus size={18} /> <span className="md:hidden">Línea</span><span className="hidden md:inline">Añadir Línea</span>
               </button>
             ) : (
-              <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg">
+              <p className="col-span-2 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg">
                 Añade una sección para empezar a añadir líneas de servicio.
               </p>
             )}
-            <div className="flex items-center gap-1">
+            <div className="flex min-w-0 items-center gap-1">
               <AddSectionControl catalogPhases={catalogPhaseNames} onAdd={addPhase} />
             </div>
             {/* AI Translate button + error */}
-            <div className="ml-auto flex flex-col items-end gap-1">
+            <div className="col-span-2 flex flex-col items-end gap-1 md:ml-auto">
               <button
                 onClick={handleTranslateForClient}
                 disabled={isTranslating}
-                className={`flex items-center justify-center gap-2 min-h-[44px] md:min-h-0 text-sm font-bold px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border ${
+                className={`flex w-full md:w-auto items-center justify-center gap-2 min-h-[44px] md:min-h-0 text-sm font-bold px-4 py-2 rounded-lg transition active:scale-95 shadow-sm border ${
                   translateDone
                     ? 'bg-green-50 text-green-700 border-green-200'
                     : 'bg-violet-50 text-violet-700 hover:bg-violet-100 border-violet-200'
@@ -899,13 +909,50 @@ export default function EstimateEditor({
           )}
         </div>
 
-        {/* STICKY ACTION BAR */}
-        <div className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] md:bottom-[calc(1.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-shell bg-white border border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-3 px-4 md:p-4 md:px-8 flex flex-col md:flex-row md:justify-between md:items-center gap-3 rounded-2xl z-50 print:hidden">
-          <div className="w-full md:w-auto flex flex-col gap-1.5">
-            <button 
-              onClick={handleSave} 
+        {/* STICKY ACTION BAR — one row on a phone: the total on the left, the save
+            button on the right. Two stacked panels (a full-width button above a
+            three-figure strip) took 140px of a 640px screen and covered the line
+            being read. */}
+        <div className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] md:bottom-[calc(1.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-shell bg-white border border-zinc-200 shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-3 md:p-4 md:px-8 flex flex-col md:flex-row md:justify-between md:items-center gap-3 md:gap-6 rounded-2xl z-50 print:hidden">
+          {/* Phone: total, what it is made of, and whether it is saved. */}
+          <div className="min-w-0 md:hidden">
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400">Total</span>
+              <span className="text-xl font-black tabular-nums tracking-tight text-blue-600">
+                {totals.total.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+              </span>
+            </div>
+            <p className="truncate text-[10px] font-bold tabular-nums text-zinc-400">
+              Base {totals.subtotal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+              {' · '}
+              IVA {totals.tax.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+            </p>
+            {(saveError || isDirty || savedAt) && (
+              <p className={`truncate text-[10px] font-bold ${saveError ? 'text-red-500' : isDirty ? 'text-amber-600' : 'text-green-600'}`}>
+                {saveError || (isDirty ? '• Cambios sin guardar' : '✓ Guardado')}
+              </p>
+            )}
+          </div>
+
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="md:hidden flex min-h-[44px] shrink-0 items-center justify-center gap-2 bg-zinc-900 hover:bg-black active:bg-zinc-800 text-white px-5 py-3 rounded-xl font-bold transition shadow-md disabled:bg-zinc-700 disabled:cursor-progress"
+          >
+            {isSaving ? (
+              <ConstructionLoader size="sm" tone="invert" label="Guardando…" />
+            ) : (
+              'Guardar'
+            )}
+          </button>
+
+          {/* Desktop keeps the original arrangement: action on the left, figures on
+              the right, with the line count and the full labels. */}
+          <div className="hidden md:flex w-auto flex-col gap-1.5">
+            <button
+              onClick={handleSave}
               disabled={isSaving}
-              className="w-full md:w-auto flex items-center justify-center gap-2 bg-zinc-900 hover:bg-black active:bg-zinc-800 text-white px-8 py-3 rounded-xl font-bold transition shadow-md disabled:bg-zinc-700 disabled:cursor-progress"
+              className="w-auto flex items-center justify-center gap-2 bg-zinc-900 hover:bg-black active:bg-zinc-800 text-white px-8 py-3 rounded-xl font-bold transition shadow-md disabled:bg-zinc-700 disabled:cursor-progress"
             >
              {isSaving ? (
                <ConstructionLoader size="sm" tone="invert" label="Guardando…" />
@@ -914,41 +961,35 @@ export default function EstimateEditor({
              )}
             </button>
             {saveError ? (
-              <p className="text-[11px] text-red-500 font-bold text-center md:text-left">{saveError}</p>
+              <p className="text-[11px] text-red-500 font-bold">{saveError}</p>
             ) : isDirty ? (
-              <p className="text-[11px] text-amber-600 font-bold text-center md:text-left">• Cambios sin guardar</p>
+              <p className="text-[11px] text-amber-600 font-bold">• Cambios sin guardar</p>
             ) : savedAt ? (
-              <p className="text-[11px] text-green-600 font-bold text-center md:text-left">✓ Guardado</p>
+              <p className="text-[11px] text-green-600 font-bold">✓ Guardado</p>
             ) : null}
           </div>
-          <div className="flex w-full md:w-auto items-center justify-between md:justify-end gap-4 md:gap-8">
-            <div className="hidden md:block text-zinc-500 text-sm font-bold">Líneas: {rows?.length || 0}</div>
-            {/* Three figures on one line cannot fit 320px with their full labels: on a
-                phone the figures shrink a step and the labels become Base / IVA / Total
-                (the rate is already on the tax selector), so the TOTAL is never clipped. */}
-            <div className="flex flex-1 min-w-0 items-end justify-between gap-2 md:flex-none md:items-center md:justify-end md:gap-8">
+          <div className="hidden md:flex w-auto items-center justify-end gap-8">
+            <div className="text-zinc-500 text-sm font-bold">Líneas: {rows?.length || 0}</div>
+            <div className="flex flex-none items-center justify-end gap-8">
               <div className="min-w-0 text-right">
                 <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">
-                  <span className="md:hidden">Base</span>
-                  <span className="hidden md:inline">Subtotal</span>
+                  Subtotal
                 </div>
-                <div className="text-xs sm:text-sm md:text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
+                <div className="text-sm md:text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
                   {totals.subtotal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                 </div>
               </div>
               <div className="min-w-0 text-right">
                 <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">
-                  <span className="md:hidden">IVA</span>
-                  <span className="hidden md:inline">{taxLabel(totals.taxRate)}</span>
+                  {taxLabel(totals.taxRate)}
                 </div>
-                <div className="text-xs sm:text-sm md:text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
+                <div className="text-sm md:text-xl font-bold text-zinc-600 tabular-nums tracking-tight">
                   {totals.tax.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
                 </div>
               </div>
               <div className="min-w-0 text-right">
                 <div className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest mb-0.5">
-                  <span className="md:hidden">Total</span>
-                  <span className="hidden md:inline">{totals.taxRate > 0 ? 'Total (con IVA)' : 'Total (sin IVA)'}</span>
+                  {totals.taxRate > 0 ? 'Total (con IVA)' : 'Total (sin IVA)'}
                 </div>
                 <div className="text-lg md:text-3xl font-black text-blue-600 tabular-nums tracking-tight">
                   {totals.total.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
