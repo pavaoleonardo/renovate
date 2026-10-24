@@ -426,23 +426,30 @@ export async function deleteClient(
 }
 
 /**
- * Deletes an obra, but only while nothing hangs from it: no lines and no derived
- * budgets.
+ * Deletes an obra: the estimate row, its partidas and its pending notes.
  *
- * A budget with partidas is a document the client may already hold, so it is never
- * removed from a mis-tap on a list; an empty one (created by accident, or re-created
- * elsewhere) is pure noise on the ficha. `parent_estimate_id` is legacy (the
- * modification flow no longer exists in `src/`), but its foreign key is still
- * ON DELETE CASCADE, so a parent with children is refused instead of silently taking
- * them down. Rows and pending notes do disappear with an empty obra: both are
- * ON DELETE CASCADE by design.
+ * Two ways in, and the difference is who decided. Without `withLines` an obra that
+ * still has partidas is refused: the budget is a document the client may already
+ * hold, and a caller that has not named those rows must never destroy them.
+ *
+ * `withLines: true` is the explicit way, and both callers only send it after a dialog
+ * that names the number of partidas — the trash on the client's ficha when the row
+ * shows a count, and the editor's «Eliminar la obra». There the rows and notes go with
+ * the estimate: both foreign keys are ON DELETE CASCADE (`estimate_rows.estimate_id`,
+ * `estimate_pending_notes.estimate_id`), so the database removes them in the same
+ * statement and a half-deleted budget cannot exist.
+ *
+ * Derived budgets (`parent_estimate_id`) are refused either way: that foreign key is
+ * CASCADE too, so deleting a parent would take documents down without ever naming
+ * them. The modification flow that created them no longer exists in `src/`.
  *
  * Scoped by `company_id` from the session, never by the id alone, and the delete only
  * reports success when exactly one row came back.
  */
 export async function deleteEstimate(
-  estimateId: string
-): Promise<{ success: true } | { success: false; error: string }> {
+  estimateId: string,
+  options: { withLines?: boolean } = {}
+): Promise<{ success: true; removedLines: number } | { success: false; error: string }> {
   const supabase = createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
@@ -467,15 +474,18 @@ export async function deleteEstimate(
 
   if (estimateError || !estimate) return { success: false, error: 'No se encontró la obra.' };
 
-  const { count } = await supabase
+  const { count: lineCount } = await supabase
     .from('estimate_rows')
     .select('id', { count: 'exact', head: true })
     .eq('estimate_id', estimateId);
 
-  if ((count ?? 0) > 0) {
+  const lines = lineCount ?? 0;
+
+  // Refused, not silently cascaded: without `withLines` nobody has named these rows.
+  if (lines > 0 && !options.withLines) {
     return {
       success: false,
-      error: `«${estimate.property_address}» tiene ${count} partida(s): sólo se puede eliminar una obra vacía.`,
+      error: `«${estimate.property_address}» tiene ${lines} partida(s): bórrala desde el editor si de verdad quieres eliminarlas.`,
     };
   }
 
@@ -505,7 +515,7 @@ export async function deleteEstimate(
 
   revalidatePath('/clients');
   if (estimate.client_id) revalidatePath(`/clients/${estimate.client_id}`);
-  return { success: true };
+  return { success: true, removedLines: lines };
 }
 
 /**

@@ -90,8 +90,9 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
             <div className="divide-y divide-zinc-50">
               {estimates.map((e) => {
                 const st = getStatusLabel(e);
+                const rowCount = rowCounts[e.id] ?? 0;
+                const empty = rowCount === 0;
                 const totals = computeTotals(Number(e.subtotal_amount ?? e.total_amount) || 0, e.tax_rate);
-                const empty = rowCounts[e.id] === 0;
                 return (
                   <div
                     key={e.id}
@@ -134,7 +135,11 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
                       </div>
                     </Link>
                     <div className="flex md:justify-end">
-                      {empty ? <DeleteObraButton estimateId={e.id} address={e.property_address} /> : null}
+                      <DeleteObraButton
+                        estimateId={e.id}
+                        address={e.property_address}
+                        rowCount={rowCount}
+                      />
                     </div>
                   </div>
                 );

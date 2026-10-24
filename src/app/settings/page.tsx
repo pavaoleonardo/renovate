@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { CompanyProfile } from '@/types'
 import { Save, Building2, CheckCircle2, Upload, ImageIcon, Trash2 } from 'lucide-react'
 import ConstructionLoader from '@/components/ConstructionLoader'
+import LoadingOverlay from '@/components/LoadingOverlay'
 import { createClient } from '@/lib/supabase/client'
 
 export default function SettingsPage() {
@@ -90,13 +91,10 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-        <ConstructionLoader size="lg" label="Cargando los datos de tu empresa…" />
-        <div className="animate-pulse space-y-4 mt-6">
-          <div className="h-8 bg-zinc-200 rounded w-48"></div>
-          <div className="h-64 bg-zinc-100 rounded-xl"></div>
-        </div>
-      </div>
+      <LoadingOverlay
+        label="Cargando los datos de tu empresa…"
+        hint="Nombre, CIF, contacto y logo: es lo que firma cada presupuesto."
+      />
     )
   }
 

@@ -2,8 +2,9 @@
 
 import { Fragment, useState, useMemo, useRef, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Estimate, EstimateRow, CatalogService, Client, EstimateStatus, CompanyProfile, PendingNote, VoiceProposalLine } from '@/types';
-import { saveEstimateRows, updateEstimateStatus, updateEstimateInfo, updateEstimateTaxRate, addPendingNote, convertPendingNote, dismissPendingNote, addClient, assignEstimateClient } from '@/app/actions';
+import { saveEstimateRows, updateEstimateStatus, updateEstimateInfo, updateEstimateTaxRate, addPendingNote, convertPendingNote, dismissPendingNote, addClient, assignEstimateClient, deleteEstimate } from '@/app/actions';
 import { Plus, GripVertical, Trash2, Printer, CheckCircle2, ChevronUp, ChevronDown, Sparkles } from 'lucide-react';
 import { computeTotals, normalizeTaxRate, taxHint, taxLabel, TAX_RATE_OPTIONS } from '@/lib/estimate-totals';
 import { catalogKey } from '@/lib/catalog-key';
@@ -12,6 +13,8 @@ import AutoGrowTextarea from './AutoGrowTextarea';
 import DecimalInput from './DecimalInput';
 import PendingNotesPanel from './PendingNotesPanel';
 import ConstructionLoader from './ConstructionLoader';
+import ConfirmDialog from './ConfirmDialog';
+import LoadingOverlay from './LoadingOverlay';
 import VoiceChangeCapture from './VoiceChangeCapture';
 import MobileLineCard from './MobileLineCard';
 import { pendingToRow } from '@/lib/pending-notes';
@@ -78,7 +81,11 @@ export default function EstimateEditor({
   const [estimate, setEstimate] = useState(initialEstimate);
   const [rows, setRows] = useState(initialRows || []);
   const [pendingNotes, setPendingNotes] = useState<PendingNote[]>(initialPendingNotes || []);
+  const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showNewClient, setShowNewClient] = useState(false);
   const [clientBusy, setClientBusy] = useState(false);
   const [clientError, setClientError] = useState<string | null>(null);
@@ -114,6 +121,19 @@ export default function EstimateEditor({
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [isDirty]);
+
+  // The wait is a modal, but only once it is a wait: a save that lands in 120 ms must
+  // not flash a dialog over the page. Slower than that and the card says what is
+  // happening, in the same place as every other blocking job in the app.
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  useEffect(() => {
+    if (!isSaving) {
+      setShowSaveModal(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowSaveModal(true), 300);
+    return () => clearTimeout(timer);
+  }, [isSaving]);
 
   // Totals recalc
   const calcRowTotal = (r: EstimateRow) => (r.price_snapshot || 0) * (r.quantity || 0);
@@ -284,6 +304,33 @@ export default function EstimateEditor({
       setSaveError(err instanceof Error ? err.message : 'Error de conexión al guardar.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  /** Partidas in this budget: the phase rows are section headings, not work. */
+  const lineItemCount = rows.filter(r => r.type !== 'phase').length;
+
+  /**
+   * Deletes this obra from its editor and walks back to where it lived. The confirm
+   * named the partidas; `deleteEstimate(…, { withLines: true })` is the only path that
+   * lets them go, and the database removes them with the estimate (ON DELETE CASCADE).
+   */
+  const handleDeleteEstimate = async () => {
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await deleteEstimate(estimate.id, { withLines: lineItemCount > 0 });
+      if (!res.success) {
+        setDeleteError(res.error);
+        return;
+      }
+      setShowDelete(false);
+      router.push(estimate.client_id ? `/clients/${estimate.client_id}` : '/clients');
+      router.refresh();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Error de conexión al eliminar.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -592,12 +639,29 @@ export default function EstimateEditor({
               <p className="mt-1 max-w-[260px] text-[10px] font-bold text-red-500 md:text-right">{taxError}</p>
             )}
 
-            <button
-              onClick={() => setShowPreview(true)}
-              className="mt-3 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-200 hover:text-zinc-900 md:mt-0 md:min-h-0 md:w-auto"
-            >
-              <Printer size={18} /> Exportar PDF
-            </button>
+            {/* Export and the way out share one row: a 44px button and a 44px trash on
+                a phone, the same two right-aligned on a desk. The trash never deletes on
+                its own — it opens a dialog that names the partidas going with the obra. */}
+            <div className="mt-3 flex items-stretch gap-2 md:mt-0 md:items-center md:justify-end">
+              <button
+                onClick={() => setShowPreview(true)}
+                className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-lg bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-200 hover:text-zinc-900 md:min-h-0 md:w-auto md:flex-none"
+              >
+                <Printer size={18} /> Exportar PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteError(null);
+                  setShowDelete(true);
+                }}
+                title="Eliminar esta obra"
+                aria-label="Eliminar esta obra"
+                className="flex min-h-[44px] w-11 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600 transition hover:bg-red-100 hover:text-red-700 active:scale-95 md:min-h-0 md:h-auto md:w-9"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -999,6 +1063,45 @@ export default function EstimateEditor({
           </div>
         </div>
       </div>
+
+      {/* Delete this obra: the confirm names the partidas and the unsaved work it takes
+          with it, and stays on screen with the reason if the server refuses. */}
+      <ConfirmDialog
+        open={showDelete}
+        title="Eliminar la obra"
+        description={
+          <>
+            Se borrará «{estimate.property_address}»
+            {lineItemCount > 0 ? (
+              <> y sus <strong className="font-black text-zinc-700">{lineItemCount} partida{lineItemCount === 1 ? '' : 's'}</strong></>
+            ) : (
+              <> (no tiene ninguna partida)</>
+            )}
+            . No se puede deshacer.
+            {isDirty ? ' También se perderán los cambios sin guardar.' : ''}
+          </>
+        }
+        confirmLabel="Eliminar la obra"
+        pendingLabel="Eliminando…"
+        pending={isDeleting}
+        error={deleteError}
+        onConfirm={handleDeleteEstimate}
+        onCancel={() => {
+          if (!isDeleting) setShowDelete(false);
+        }}
+      />
+
+      {/* The waits are modals, in the same place as every other blocking job. */}
+      <LoadingOverlay
+        open={showSaveModal}
+        label="Guardando el presupuesto…"
+        hint="Escribiendo las líneas en el servidor. No cierres esta pestaña."
+      />
+      <LoadingOverlay
+        open={isDeleting}
+        label="Eliminando la obra…"
+        hint={`«${estimate.property_address}»`}
+      />
 
       {/* PDF Preview Modal outside the no-print region */}
       {showPreview && (

@@ -20,13 +20,11 @@ import { hasMarketBand } from '@/lib/market-band'
 import { AlertCircle, CheckCircle2, Box, Download, Plus, RefreshCw, Search, Sparkles, Trash2, UploadCloud, X } from 'lucide-react'
 import ConstructionLoader from '@/components/ConstructionLoader'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import LoadingOverlay from '@/components/LoadingOverlay'
 import NameDialog from '@/components/NameDialog'
 import { CatalogService, ExcelPreview, ExcelPreviewMatch } from '@/types'
 
 const UNITS = ['m2', 'ml', 'm3', 'ud', 'kg', 'h', 'vg']
-
-/** Fixed widths for the loading skeleton: a random one would clash between renders. */
-const CATALOG_SKELETON_WIDTHS = ['w-1/2', 'w-2/5', 'w-3/5', 'w-1/3', 'w-1/2', 'w-2/5']
 
 const eur = (value: number) =>
   value.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 })
@@ -1493,18 +1491,10 @@ export default function CatalogPage() {
       </div>
 
       {loading ? (
-        <div className="bg-white rounded-2xl border border-zinc-100 p-8">
-          <ConstructionLoader size="lg" label="Colocando tus partidas…" />
-          <div className="mt-6 space-y-2.5">
-            {CATALOG_SKELETON_WIDTHS.map((width, index) => (
-              <div key={index} className="flex items-center gap-3">
-                <span className="h-3 w-12 shrink-0 rounded bg-zinc-100 animate-pulse" />
-                <span className={`h-3 rounded bg-zinc-100 animate-pulse ${width}`} />
-                <span className="ml-auto h-3 w-14 shrink-0 rounded bg-zinc-100 animate-pulse" />
-              </div>
-            ))}
-          </div>
-        </div>
+        <LoadingOverlay
+          label="Colocando tus partidas…"
+          hint="Leyendo tu catálogo de la base de datos."
+        />
       ) : services.length === 0 ? (
         <div className="bg-white rounded-2xl border border-zinc-100 p-12 text-center">
           <p className="text-zinc-500 font-medium">Tu catálogo está vacío.</p>
