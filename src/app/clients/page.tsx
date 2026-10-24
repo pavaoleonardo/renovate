@@ -1,11 +1,10 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
-import { addClient, getClients, getCompanyProfile, getEstimates } from '@/app/actions';
+import { getClients, getCompanyProfile, getEstimates } from '@/app/actions';
 import { Estimate } from '@/types';
 import { computeTotals } from '@/lib/estimate-totals';
-import { ChevronRight, Plus, Users } from 'lucide-react';
+import { ChevronRight, Users } from 'lucide-react';
 import CompanyBrand from '@/components/CompanyBrand';
-import SubmitButton from '@/components/SubmitButton';
+import NewClientButton from '@/components/NewClientButton';
 
 const fmt = (n: number) => n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 
@@ -44,17 +43,6 @@ export default async function ClientsPage({
     byClient.set(e.client_id, entry);
   }
 
-  const handleNewClient = async (formData: FormData) => {
-    'use server';
-    const name = ((formData.get('clientName') as string) || '').trim();
-    if (!name) return;
-    const client = await addClient(name, {
-      email: (formData.get('clientEmail') as string) || '',
-      phone: (formData.get('clientPhone') as string) || '',
-    });
-    redirect(`/clients/${client.id}`);
-  };
-
   return (
     <div className="max-w-shell mx-auto py-12 px-4 sm:px-6 lg:px-8">
       {/* Who is quoting: the company's logo and name, large, before the list. */}
@@ -82,36 +70,7 @@ export default async function ClientsPage({
           </p>
         </div>
 
-        <form
-          action={handleNewClient}
-          className="flex flex-wrap gap-2 items-center bg-white p-2 rounded-xl border border-zinc-200 shadow-sm w-full md:w-auto"
-        >
-          <input
-            type="text"
-            name="clientName"
-            placeholder="Nombre del cliente..."
-            className="flex-1 min-w-[150px] px-3 py-2 bg-zinc-50 border-transparent rounded-lg text-sm focus:ring-2 focus:ring-blue-100 outline-none font-medium text-zinc-900"
-            required
-          />
-          <input
-            type="email"
-            name="clientEmail"
-            placeholder="Email..."
-            className="flex-1 min-w-[130px] px-3 py-2 bg-zinc-50 border-transparent rounded-lg text-sm focus:ring-2 focus:ring-blue-100 outline-none font-medium text-zinc-900"
-          />
-          <input
-            type="tel"
-            name="clientPhone"
-            placeholder="Teléfono..."
-            className="flex-1 min-w-[110px] px-3 py-2 bg-zinc-50 border-transparent rounded-lg text-sm focus:ring-2 focus:ring-blue-100 outline-none font-medium text-zinc-900"
-          />
-          <SubmitButton
-            pendingLabel="Creando…"
-            className="shrink-0 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white px-5 py-2.5 rounded-lg font-bold shadow transition flex items-center gap-2 whitespace-nowrap disabled:bg-blue-400"
-          >
-            <Plus size={16} /> Nuevo cliente
-          </SubmitButton>
-        </form>
+        <NewClientButton />
       </div>
 
       {searchParams?.message && (
@@ -126,7 +85,7 @@ export default async function ClientsPage({
             <Users size={22} />
           </div>
           <p className="text-zinc-500 font-medium text-lg">
-            Aún no tienes clientes. Crea el primero arriba y añádele su primera obra.
+            Aún no tienes clientes. Pulsa «Nuevo cliente» y añádele su primera obra.
           </p>
         </div>
       ) : (
